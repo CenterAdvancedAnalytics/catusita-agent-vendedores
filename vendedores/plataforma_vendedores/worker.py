@@ -94,10 +94,17 @@ async def correr() -> None:
     grafo = cargar_grafo()
     registro = importlib.import_module("vendedores.registro")
 
+    # Se distingue lo DESCUBIERTO de lo DELEGABLE. Un área sin subgrafo
+    # compilado existe en el disco y el orquestador no la ve: contar las dos
+    # cosas juntas hacía que el log dijera "5 áreas" cuando solo 2 atienden.
     areas = registro.mapa()
-    logging.info(f"worker de vendedores · cola={cola} · {len(areas)} áreas en el grafo")
+    delegables = set(registro.nodos())
+    logging.info(
+        f"worker de vendedores · cola={cola} · {len(delegables)} de {len(areas)} áreas atienden"
+    )
     for nombre, (modelo, tools) in sorted(areas.items()):
-        logging.info(f"    {nombre:16} {modelo:28} {len(tools)} tools")
+        marca = "" if nombre in delegables else "   (sin subgrafo, no se delega)"
+        logging.info(f"    {nombre:16} {modelo:28} {len(tools)} tools{marca}")
 
     # El padrón, antes de escuchar: si no publico, el router no sabe que estos
     # números son míos y sus dueños entran al multiagente equivocado.
