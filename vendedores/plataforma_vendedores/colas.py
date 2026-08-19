@@ -28,7 +28,9 @@ COLA = "vendedores"
 # Adonde el worker deja la respuesta para que el webhook la envíe.
 COLA_RESPUESTAS = "respuestas:vendedores"
 
-# El servicio de Railway que levanta este worker.
+# El servicio de Railway que levanta este worker. Su watch path es
+# `vendedores/** + requirements.txt`: un cambio acá lo reconstruye a él y a
+# nadie más.
 SERVICIO = "catusita-vendedores"
 
 
