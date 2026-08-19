@@ -15,8 +15,11 @@ plan_de_datos.md
 plan_de_implementacion.md
 plan_de_prueba.md
 
-# Skills internos y guías (local, no versionar)
-.claude/skills/
+# Los skills SI se versionan: son conocimiento del proyecto, no config local.
+# Estaban ignorados y `mejoras-catusita` igual estaba trackeado — o sea que la
+# regla no se cumplia y el proximo skill se perdia en silencio.
+# Lo que queda ignorado es la config de la maquina de cada uno.
+.claude/settings.local.json
 añadir_nuevo_usuario_mock.md
 
 # Planes de migración / validación (local)
