@@ -45,14 +45,29 @@ K = 5
 # una copia: si los dos caminos se separan, el mismo mensaje encuentra proceso
 # por uno y no por el otro.
 #
-# ── Lo que se midió ───────────────────────────────────────────────────────────
+# ── Por qué 0.50 y no menos ───────────────────────────────────────────────────
+#
+# Devolver un proceso que NO aplica es peor que no devolver ninguno. El
+# orquestador trata lo que le llega como el procedimiento oficial —«seguilo, no
+# improvises lo que ya está escrito»— así que un proceso de devoluciones
+# recuperado para una consulta de horarios lo hace ejecutar pasos equivocados
+# con toda seguridad.
+#
+# Sin proceso, en cambio, improvisa: usa sus áreas y su criterio. Eso puede
+# salir peor o mejor, pero no arrastra la autoridad de un procedimiento escrito.
+#
+# Entre los dos errores, el barato es no recuperar.
+#
+# ── Lo que se midió (con procesos de prueba, no reales) ───────────────────────
 #
 #     0.697   'quiere comprar 5000 y solo tiene 2000 de linea'  -> límite de crédito
 #     0.463   'me llego el filtro todo abollado'                -> devolución por daño
 #     0.225   'a que hora abre el local'                        -> nada, y está bien
 #
-# Con text-embedding-3-small las similitudes corren más bajo de lo que uno
-# espera: 0.35 no es «apenas parecido», es un match decente.
+# Con 0.50, el segundo caso NO se recupera. Es el costo de subir el umbral y
+# está asumido: ese 0.463 salía de una `descripcion` que yo escribí, no de una
+# real. Con text-embedding-3-small las similitudes corren bajo, y la forma de
+# subirlas es redactar mejor la `descripcion`, no aflojar el corte.
 #
 # ── De qué depende el margen ──────────────────────────────────────────────────
 #
@@ -61,10 +76,9 @@ K = 5
 # transporte». Redactarla en idioma de manual bajó la similitud de 0.463 a 0.390
 # en la misma consulta — medido, no estimado.
 #
-# Por eso `descripcion` se escribe con las palabras del que pregunta.
-#
-# No mover este número sin medir contra los procesos reales cargados.
-UMBRAL = 0.35
+# Recalibrar cuando haya procesos reales cargados, midiendo contra consultas
+# reales de los chats.
+UMBRAL = 0.50
 
 
 async def buscar(consulta: str) -> list[dict]:

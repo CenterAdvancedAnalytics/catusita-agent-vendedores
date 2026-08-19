@@ -27,12 +27,19 @@ async def buscar_conocimiento(
     procesos = await servicio.buscar(consulta)
 
     if not procesos:
-        # «No sé» y punto. No se inventa un procedimiento ni se bloquea el
-        # turno: el orquestador tiene sus áreas y su criterio, y con eso
-        # atiende. Que no haya proceso escrito no es que no se pueda resolver.
+        # «No sé», pero diciendo qué hacer con ese «no sé».
+        #
+        # Un `encontrado: False` a secas se lee como un freno, y el orquestador
+        # tiende a trasladárselo al usuario: «no tengo información sobre eso».
+        # Que no exista un procedimiento escrito no es que no se pueda resolver
+        # — es que no hay una forma oficial y hay que usar criterio.
         return _responder({
             "encontrado": False,
-            "mensaje": "No hay ningún proceso escrito para esto.",
+            "mensaje": (
+                "No hay ningún proceso escrito para esto. No es un impedimento: "
+                "resolvelo con tus áreas y tu criterio. Lo único que no cambia "
+                "es que no inventes datos ni autorices nada."
+            ),
         }, tool_call_id)
 
     return _responder({
