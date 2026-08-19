@@ -16,14 +16,15 @@ de ahora. Tres capas, que se agregan en este orden:
        Los procedimientos: cómo se determina si una pieza calza, cuándo se
        deriva a créditos, qué se responde ante un reclamo. Reglas de negocio
        recuperables, no hardcodeadas en un prompt.
-       -> pgvector; ver db/migrations/004_conocimiento.sql (sin aplicar:
-          falta elegir el proveedor de embeddings)
+       -> pgvector; migraciones 004 y 008, aplicadas.
 
        ESTA CAPA CORRE EN TODOS LOS TURNOS. No es un plan B para cuando el
-       orquestador se traba: es de donde saca cómo trabajar, siempre. Todo
-       proceso que ejecute tiene que estar en la tabla — lo que no está, no lo
-       sabe hacer. Y cada proceso trae su `entrega`: no solo cómo resolverlo,
-       también cómo presentarlo.
+       orquestador se traba: es de donde saca cómo trabajar, siempre. Cada
+       proceso trae su `procedimiento` completo: qué áreas consultar, qué
+       pedirle a cada una y cómo se contesta.
+
+       Lo que no está en la tabla no lo tiene escrito — y ahí atiende igual,
+       con sus áreas y su criterio.
 
 ── Por qué esto está acá y no en un área ──────────────────────────────────────
 
@@ -38,9 +39,11 @@ no hay un dato de compatibilidad que buscar.
 Por eso este nodo alimenta al orquestador y no a las áreas: es él quien
 necesita saber cómo se razona.
 """
+import asyncio
 import json
 import logging
 
+from clientes.agentes.conocimiento import servicio
 from clientes.plataforma_clientes import redis as redis_mod
 from clientes.plataforma_clientes.estado import EstadoAgente
 
@@ -49,12 +52,13 @@ MAX_MENSAJES = 20 # 10 turnos (user + assistant)
 
 # Cuántos procesos se le pasan al orquestador por turno. Bajo a propósito: cada
 # uno se paga en tokens en todas las llamadas del turno.
-K_PROCESOS = 3
+MAX_PROCESOS = 3
 
-# Debajo de esta similitud se considera que NO hay proceso y se abre ticket.
-# Provisional: hay que calibrarlo con documentos reales cargados. Muy alto llena
-# la cola de tickets falsos; muy bajo aplica procedimientos que no venían al caso.
-UMBRAL = 0.35
+# El umbral NO se define acá. Vive en `servicio.UMBRAL` y esta puerta usa el
+# mismo. Tenerlo en dos lados es la forma más fácil de que la búsqueda
+# automática y la búsqueda a pedido dejen de coincidir sin que nadie lo note:
+# el mismo mensaje encontraría proceso por un camino y no por el otro.
+UMBRAL = servicio.UMBRAL
 
 
 async def nodo_contexto(state: EstadoAgente) -> dict:
@@ -63,9 +67,35 @@ async def nodo_contexto(state: EstadoAgente) -> dict:
     Ya no hace falta pasarle el multiagente: este módulo vive dentro de
     `clientes/`, así que sus claves y sus tablas son las de clientes y ninguna otra.
 
-    Hoy arma solo la capa 1. Las otras dos se agregan acá cuando existan.
+    Hoy arma la capa 1 y la 3. La 2 —memoria de largo plazo— se agrega acá.
+
+    Las dos van en paralelo: son dos sistemas distintos (Redis y Postgres) y
+    encadenarlas suma sus latencias al principio de CADA turno, antes de que el
+    usuario vea nada.
     """
-    return {"historial": await _corto_plazo(state["conversacion"])}
+    historial, procesos = await asyncio.gather(
+        _corto_plazo(state["conversacion"]),
+        _procesos(_ultima_consulta(state)),
+    )
+    return {"historial": historial, "procesos": procesos}
+
+
+def _ultima_consulta(state: EstadoAgente) -> str:
+    """Lo que el usuario acaba de escribir, para buscarle el proceso.
+
+    Se busca con el mensaje de ahora y no con la conversación entera: el
+    historial arrastra temas viejos y el vector promedio termina no pareciéndose
+    a ninguno. Es el mismo motivo por el que no se reformula la consulta.
+    """
+    for m in reversed(state.get("messages") or []):
+        if getattr(m, "type", "") == "human":
+            contenido = m.content
+            if isinstance(contenido, str):
+                return contenido
+            # Turno con imagen: el texto va en el primer bloque.
+            return " ".join(b.get("text", "") for b in contenido
+                            if isinstance(b, dict) and b.get("type") == "text")
+    return ""
 
 
 def _clave(conversacion: str) -> str:
@@ -135,9 +165,9 @@ async def _largo_plazo(conversacion: str, perfil: dict) -> dict:
 async def _procesos(consulta: str) -> list:
     """Procedimientos de Catusita que aplican a lo que están preguntando.
 
-    Corre SIEMPRE, antes del orquestador. Busca por similitud contra el `cuando`
-    de cada proceso —la situación, no el procedimiento— y devuelve los que
-    aplican con sus `pasos` y su `entrega`.
+    Corre SIEMPRE, antes del orquestador. Busca por similitud contra la
+    `descripcion` de cada proceso —cómo lo pide el usuario, no cómo se llama
+    adentro— y devuelve los que aplican, con su `procedimiento` completo.
 
     Devuelve el procedimiento, no la respuesta: el orquestador sigue teniendo
     que razonar y decidir. Lo que cambia es que ya no improvisa el cómo.
@@ -147,51 +177,38 @@ async def _procesos(consulta: str) -> list:
     procedimiento. Y no hace falta filtrar: cada multiagente tiene su propia
     tabla, así que la frontera es el nombre de la tabla y no un WHERE.
 
-    ── Si no encuentra nada: se abre una solicitud ────────────────────────────
+    ── Si no encuentra nada, no pasa nada ─────────────────────────────────────
 
-    Un turno sin proceso recuperado deja al orquestador sin guía. No se
-    improvisa y no se traga en silencio: se registra en
-    `solicitud_proceso_nuevo_<multiagente>` con origen `sin_resultado`, y queda
-    pendiente de que alguien escriba el procedimiento.
+    Devuelve una lista vacía y el turno sigue igual. No se registra nada, no se
+    avisa a nadie.
 
-        consulta sin proceso -> solicitud -> alguien escribe el proceso
-                                               -> se cierra apuntando a la fila
+    Es deliberado. Este nodo corre en CADA turno, incluidos «hola», «gracias» y
+    «ok dale», que no necesitan ningún procedimiento. Cualquier cosa que se
+    dispare al no encontrar proceso se dispararía sobre todos esos mensajes.
 
-    Hay un SEGUNDO camino que no pasa por acá: cuando sí se recuperó un proceso
-    pero al orquestador no le sirve, él llama a `solicitar_proceso_nuevo` y la
-    solicitud entra con origen `rechazado`. Ver los tools del área.
+    Sin proceso, el orquestador atiende con sus áreas y su criterio. El RAG de
+    procesos es una guía, no un permiso: que nadie haya escrito el procedimiento
+    no significa que la consulta no se pueda resolver.
 
-    Con eso el sistema dice qué le falta. Es lo que hoy se hace a mano en
-    `mejoras/incidencias.json`, sin depender de que el asesor lo reporte.
+    ── Cuántos procesos entran ────────────────────────────────────────────────
 
-    Tres cosas que no son obvias al implementarlo:
+    Cada uno son tokens en TODAS las llamadas del turno. Meter 5 procesos largos
+    reconstruye el problema que esto vino a resolver, solo que pagado en
+    recuperación en vez de en prompt. Por eso se corta en MAX_PROCESOS=3, aunque
+    `servicio.buscar` devuelva más: la otra puerta —la tool del área— sí los
+    quiere todos, porque ahí ya se está buscando a propósito.
 
-    a) «NO ENCONTRAR NADA» HAY QUE DEFINIRLO. Una búsqueda por coseno SIEMPRE
-       devuelve un top-k; lo que no hay es un resultado *bueno*. Por eso existe
-       UMBRAL: por debajo de eso se trata como vacío. Y por eso el ticket guarda
-       `mejor_sim` — separa «no existe el proceso» de «existe pero no lo
-       recupera», que se arreglan distinto (escribir vs. corregir el `cuando`).
+    ── Por qué esto no puede fallar hacia arriba ──────────────────────────────
 
-    b) SE AGRUPA, NO SE ACUMULA. La misma carencia va a llegar con veinte
-       redacciones distintas. Antes de insertar hay que buscar un ticket
-       pendiente parecido y sumarle `veces`. Si no, la lista es ilegible en una
-       semana y se pierde justo lo valioso: qué proceso es el más pedido.
-
-    c) EL TICKET NO PUEDE DEMORAR LA RESPUESTA. Se abre fuera del camino del
-       usuario. Y si falla el insert, se loguea y se sigue — no se le cae la
-       conversación a nadie por no poder registrar un ticket.
-
-    Mientras tanto el orquestador igual tiene que contestar algo. Sin proceso,
-    lo honesto es decir que no tiene el procedimiento y derivar. Nunca inventarlo:
-    esa es exactamente la respuesta que después aparece como queja.
-
-    ── Lo que sigue abierto ───────────────────────────────────────────────────
-
-    CUÁNTOS PROCESOS ENTRAN. Cada uno son tokens en TODAS las llamadas del
-    turno. Meter 5 procesos largos reconstruye el problema que esto vino a
-    resolver, solo que pagado en recuperación en vez de en prompt. Empezar con
-    k=2 o 3 y medir.
-
-    TODO: implementar. Depende de que se elija el proveedor de embeddings.
+    Corre en todos los turnos, así que un error acá deja al multiagente entero
+    sin contestar. Si OpenAI o Postgres no responden, se sigue sin procesos: el
+    orquestador contesta peor, pero contesta.
     """
-    raise NotImplementedError
+    if not consulta:
+        return []
+    try:
+        procesos = await servicio.buscar(consulta)
+    except Exception as e:
+        logging.error(f"[contexto] no se pudieron recuperar procesos: {e}")
+        return []
+    return procesos[:MAX_PROCESOS]

@@ -23,8 +23,24 @@ class EstadoAgente(TypedDict):
     # router— solo identifica la conversación dentro de él.
     conversacion: str
 
+    # Lo que el orquestador le pide al área en la que acaba de delegar:
+    # {"consulta": "...", "tool_call_id": "..."}. Lo escribe la tool de
+    # delegación y lo consume el nodo del área, que responde con un ToolMessage
+    # a ese mismo tool_call_id.
+    encargo: dict
+
     perfil: dict          # lo resolvió el router
     historial: list       # lo trae el nodo contexto
+
+    # Los procedimientos de Catusita que aplican a este turno. Los recupera
+    # `contexto` del RAG, ANTES de que el orquestador corra, y son el «cómo se
+    # hace esto acá»: cada uno trae sus `pasos` y su `entrega`.
+    #
+    # Lista vacía significa que no había ninguno por encima del umbral. No es
+    # un error ni bloquea nada: el orquestador atiende con sus áreas y su
+    # criterio. La mayoría de los turnos —saludos, «ok», «gracias»— no necesitan
+    # ningún procedimiento.
+    procesos: list
 
     # Entidades sacadas del mensaje SIN IA: RUC, pedido, placa, SKU.
     # Lo llena `contexto`. Sirve para que el orquestador no le pida al usuario un

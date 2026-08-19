@@ -1,48 +1,48 @@
 """Tools de `conocimiento` (supervisores). El orquestador NO ve la búsqueda por dentro."""
+import json
 from typing import Annotated
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool, InjectedToolCallId
-from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
+
+from supervisores.agentes.conocimiento import servicio
+
+
+def _responder(resultado: dict, tool_call_id: str) -> Command:
+    return Command(update={"messages": [ToolMessage(
+        content=json.dumps(resultado, ensure_ascii=False, default=str),
+        tool_call_id=tool_call_id,
+    )]})
 
 
 @tool
 async def buscar_conocimiento(
     consulta: str,
-    state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Busca en los procesos de Catusita cómo se resuelve algo. Úsala cuando lo
     que te sirvió el contexto no alcance, o cuando la consulta no corresponda a
     ninguna otra área. Pasa la consulta del usuario TAL CUAL, sin reformularla."""
-    raise NotImplementedError
+    procesos = await servicio.buscar(consulta)
+
+    if not procesos:
+        # «No sé» y punto. No se inventa un procedimiento ni se bloquea el
+        # turno: el orquestador tiene sus áreas y su criterio, y con eso
+        # atiende. Que no haya proceso escrito no es que no se pueda resolver.
+        return _responder({
+            "encontrado": False,
+            "mensaje": "No hay ningún proceso escrito para esto.",
+        }, tool_call_id)
+
+    return _responder({
+        "encontrado": True,
+        "procesos": [
+            {"proceso": p["proceso"], "procedimiento": p["procedimiento"],
+             "similitud": round(p["similitud"], 3)}
+            for p in procesos
+        ],
+    }, tool_call_id)
 
 
-@tool
-async def solicitar_proceso_nuevo(
-    consulta: str,
-    motivo: str,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-) -> Command:
-    """Deja registrado que falta un procedimiento. Úsala cuando el proceso que
-    recuperaste NO resuelve lo que están preguntando: mejor decir que no lo
-    tienes y que quede anotado, que inventar un procedimiento. En `motivo`,
-    por qué no servía lo que encontraste."""
-    raise NotImplementedError
-
-
-TOOLS = [buscar_conocimiento, solicitar_proceso_nuevo]
-
-# ── Los dos orígenes de una solicitud ────────────────────────────────────────
-#
-#   'sin_resultado'   automático. `contexto` buscó y no pasó el UMBRAL. Lo
-#                     registra el área sola al no encontrar nada.
-#
-#   'rechazado'       deliberado. Esta tool. SÍ había un proceso pero al
-#                     orquestador no le servía. Es la señal más valiosa: hay un
-#                     procedimiento que PARECE aplicar y no aplica, y eso no se
-#                     arregla escribiendo uno nuevo sino corrigiendo su `cuando`.
-#
-# Por eso `motivo` es obligatorio acá y NULL en el automático: en el primer caso
-# no hay nada que explicar, en el segundo es todo lo que hay que explicar.
+TOOLS = [buscar_conocimiento]

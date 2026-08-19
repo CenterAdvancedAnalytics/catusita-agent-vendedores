@@ -61,11 +61,9 @@ Es un área propia justamente para que esto crezca sin tocar nada más:
 Cada uno es un paso dentro de `servicio.py`. El contrato con el orquestador
 —entra una consulta, salen documentos— no cambia con ninguno.
 """
-from supervisores.agentes.conocimiento.agente import NODO
+from supervisores.agentes.conocimiento.agente import NODO, MODELO
 from supervisores.agentes.conocimiento.tools import TOOLS
 
-# Chico: hoy solo formatea lo que devuelve la búsqueda.
-MODELO = "claude-haiku-4-5-20251001"
 
 
 # Lo que el orquestador ve de esta área. Es la PREGUNTA que contesta, no

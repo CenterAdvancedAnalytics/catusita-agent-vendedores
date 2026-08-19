@@ -45,7 +45,7 @@ mandar un mensaje directo — y ahí se rompe la única frontera de proceso que
 tiene el sistema.
 """
 
-REPO = "CenterAdvancedAnalytics/catusita-agent-vendedores"
+REPO = "gabrielcz6/catusita-agent-vendedores"
 RAMA = "arquitectura-vertical"
 
 # El servicio del que se copian las variables compartidas (DATABASE_URL, las
@@ -83,10 +83,11 @@ SERVICIOS = {
         "watch": "clientes/**",
         "rol": "worker: lee la cola `clientes` y corre su grafo",
         "publico": False,
-        # Sus áreas todavía tienen tools en NotImplementedError. Crear el
-        # servicio antes de eso solo suma un contenedor que arranca y no
-        # atiende nada.
-        "listo": False,
+        # 2 áreas vivas: `productos` (precio de lista, sin almacén ni neto) y
+        # `conocimiento`. `vehiculos`, `postventa` y `recomendaciones` siguen
+        # con sus tools en NotImplementedError — el orquestador no las ve
+        # porque el registro solo delega en áreas con NODO compilado.
+        "listo": True,
     },
     "catusita-supervisores": {
         "dockerfile": "supervisores/Dockerfile",
@@ -94,7 +95,10 @@ SERVICIOS = {
         "watch": "supervisores/**",
         "rol": "worker: lee la cola `supervisores` y corre su grafo",
         "publico": False,
-        "listo": False,
+        # 1 área: `conocimiento`. Alcanza para contestar cómo se hace algo en
+        # Catusita, que es todo lo que este multiagente hace hoy. Lo de fondo
+        # —si un supervisor ve la cartera de SUS asesores— sigue sin decidirse.
+        "listo": True,
     },
 }
 

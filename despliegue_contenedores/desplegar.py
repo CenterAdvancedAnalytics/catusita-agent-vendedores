@@ -48,13 +48,64 @@ def _variables_de(servicio: str) -> dict:
         return {}
 
 
-def _existentes() -> set:
+def _proyecto() -> dict:
     codigo, salida = _railway(["status", "--json"])
     try:
-        d = json.loads(salida)
+        return json.loads(salida)
     except Exception:
         sys.exit("No se pudo leer el proyecto. ¿Estás logueado? -> railway login")
-    return {e["node"]["name"] for e in d.get("services", {}).get("edges", [])}
+
+
+def _ids() -> dict:
+    """{nombre: id}. Los ids hacen falta para la API de triggers."""
+    d = _proyecto()
+    return {e["node"]["name"]: e["node"]["id"]
+            for e in d.get("services", {}).get("edges", [])}
+
+
+def _api(consulta: str) -> dict:
+    codigo, salida = _railway(["api", consulta])
+    try:
+        # El CLI a veces imprime una línea extra después del JSON.
+        return json.loads(salida[:salida.rindex("}") + 1])
+    except Exception:
+        return {"errors": [{"message": salida.strip()[:200]}]}
+
+
+def _con_trigger(proyecto: dict) -> dict:
+    """{serviceId: rama} de los que ya tienen disparador.
+
+    ── Por qué esto es su propio paso ─────────────────────────────────────────
+
+    `railway add --repo --branch` crea el servicio y lo conecta, pero NO crea el
+    deployment trigger. El síntoma es de los peores: el servicio se despliega
+    UNA vez —la del alta— y después los push no hacen nada. Parece que anduvo.
+
+    Nos pasó: dos servicios quedaron corriendo un commit viejo y el arreglo
+    estaba en GitHub sin que Railway se enterara.
+    """
+    d = _api('query { project(id: "%s") { deploymentTriggers { edges { node '
+             '{ serviceId branch repository } } } } }' % proyecto["id"])
+    try:
+        edges = d["data"]["project"]["deploymentTriggers"]["edges"]
+    except Exception:
+        return {}
+    return {e["node"]["serviceId"]: e["node"]["branch"] for e in edges}
+
+
+def _crear_trigger(proyecto_id: str, entorno_id: str, servicio_id: str) -> str:
+    d = _api(
+        'mutation { deploymentTriggerCreate(input: { branch: "%s", repository: "%s", '
+        'provider: "github", projectId: "%s", environmentId: "%s", serviceId: "%s" }) '
+        '{ id } }' % (RAMA, REPO, proyecto_id, entorno_id, servicio_id)
+    )
+    if d.get("errors"):
+        return "ERROR: " + d["errors"][0].get("message", "")[:150]
+    return "creado"
+
+
+def _existentes() -> set:
+    return set(_ids())
 
 
 def _valores() -> dict:
@@ -83,7 +134,13 @@ def main() -> None:
     if not valores:
         sys.exit(f"No se pudieron leer las variables de {FUENTE}.")
 
-    hay = _existentes()
+    proyecto = _proyecto()
+    ids = _ids()
+    hay = set(ids)
+    triggers = _con_trigger(proyecto)
+    entorno = next(
+        (e["node"]["id"] for e in proyecto.get("environments", {}).get("edges", [])
+         if e["node"]["name"] == "production"), None)
     plan = desplegables()
     if args.servicio:
         if args.servicio not in SERVICIOS:
@@ -103,6 +160,15 @@ def main() -> None:
         print(f"   variables  : {len(spec['variables']) - len(faltan)}/{len(spec['variables'])}"
               + (f"   FALTAN: {faltan}" if faltan else ""))
 
+        # Sin trigger el servicio se despliega UNA vez y después los push no
+        # hacen nada. Es la falla que más caro sale porque parece que anduvo.
+        rama_trigger = triggers.get(ids.get(nombre, ""))
+        if rama_trigger == RAMA:
+            print(f"   trigger    : ok, escucha {RAMA}")
+        else:
+            print(f"   trigger    : {'apunta a ' + rama_trigger if rama_trigger else 'NO EXISTE'}"
+                  f"  -> los push NO lo redespliegan")
+
         if faltan:
             # Un servicio a medias arranca y falla en el primer turno, que es la
             # peor forma de enterarse.
@@ -120,12 +186,21 @@ def main() -> None:
             cmd = ["add", "--service", nombre, "--repo", REPO, "--branch", RAMA]
             for v in pares:
                 cmd += ["-v", v]
-            codigo, salida = _railway(cmd)
-            print(f"   creado ({codigo})")
+            _railway(cmd)
+            ids.update(_ids())     # el id recién existe ahora
+            print(f"   creado")
         else:
             for v in pares:
                 _railway(["variables", "-s", nombre, "--skip-deploys", "--set", v])
             print(f"   variables sincronizadas ({len(pares)})")
+
+        sid = ids.get(nombre)
+        if sid and rama_trigger != RAMA:
+            # `serviceConnect` re-apunta el origen; el trigger es aparte y es el
+            # que engancha el webhook de GitHub.
+            _api('mutation { serviceConnect(id: "%s", input: { repo: "%s", branch: "%s" }) '
+                 '{ id } }' % (sid, REPO, RAMA))
+            print(f"   trigger    : {_crear_trigger(proyecto['id'], entorno, sid)}")
         print()
 
     saltados = {n: s for n, s in SERVICIOS.items() if not s.get("listo", True)}
