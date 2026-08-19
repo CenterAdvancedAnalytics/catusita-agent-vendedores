@@ -1,66 +1,43 @@
-"""Acceso de `facturacion` (vendedores) a las BACKEND APIS.
+"""Acceso de `facturacion` (vendedores) a la API de Catusita.
 
-    GET /documento?numero=&tipo=&empresa=          el PDF
-    GET /documento/pagos?numero=&tipo=&empresa=    cómo se pagó
-    GET /pedidos/{ruc}                             para ubicar el documento
+    GET /api/electronic-documents/search           el PDF (por URL)
+    GET /api/document-payment-application/search   cómo se pagó
+    GET /api/sales/orders/documents                para ubicar el documento
 
-── Por qué esta área llama a /pedidos ─────────────────────────────────────────
+── Por qué esta área llama a los pedidos ──────────────────────────────────────
 
-Los dos primeros endpoints exigen `numero + tipo + empresa`. El asesor solo sabe
-el número («mandame la F001-0102835»). Los otros dos códigos únicamente aparecen
-dentro de los pedidos del cliente.
+Los dos primeros endpoints exigen `DocumentNumber + DocumentType + CompanyCode`.
+El asesor solo sabe el número («mandame la F001-0102835»). Los otros dos códigos
+únicamente aparecen dentro de los pedidos del cliente.
 
 No es hablarle al ÁREA `pedidos` — es usar un endpoint para resolver sus propios
 identificadores. Lo que el diseño prohíbe es que un área le PIDA algo a otra;
 acá no hay nadie del otro lado.
 
-Dicho eso: «para bajar una factura primero hay que ubicarla en los pedidos» es
-un PROCEDIMIENTO, y su lugar natural es el RAG de procesos, no este docstring.
-Cuando `conocimiento` tenga contenido cargado, esto se mueve allá.
+── El PDF ya no viene en base64 ───────────────────────────────────────────────
+
+El wrapper devolvía `pdf_base64` listo. La API real devuelve una URL a otro
+puerto:
+
+    pdfUrl: http://api.catusita.com:8086/ICFacturaPDF/20100080002-01-F001-0073326.PDF
+
+WhatsApp necesita los bytes, así que se descargan acá y se devuelve `pdf_base64`
+igual que antes. La tool no se entera del cambio, que es el punto.
+
+`hasPdf` se mira antes de bajar: un documento sin PDF emitido tiene la URL
+armada igual, y bajarla da un 404 que se leería como «falló la descarga» en vez
+de «ese documento no tiene PDF».
 """
-import os
+import base64
 
-import httpx
-from dotenv import load_dotenv
+from vendedores.plataforma_vendedores import catusita_api
 
-load_dotenv()
-
-BASE_URL = os.getenv("SAP_BASE_URL", "")
-API_KEY = os.getenv("SAP_API_KEY", "")
-TIMEOUT = 15.0
-
-# `/documento` descarga un PDF entero.
 TIMEOUT_DESCARGA = 30.0
 
-_cliente: httpx.AsyncClient | None = None
-
-
-def _http() -> httpx.AsyncClient:
-    global _cliente
-    if _cliente is None:
-        if not BASE_URL:
-            raise RuntimeError("Falta SAP_BASE_URL.")
-        _cliente = httpx.AsyncClient(
-            base_url=BASE_URL, headers={"X-API-Key": API_KEY}, timeout=TIMEOUT)
-    return _cliente
-
-
-async def _get(path: str, params: dict | None = None, timeout: float | None = None) -> dict:
-    try:
-        kwargs: dict = {"params": params}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        r = await _http().get(path, **kwargs)
-        r.raise_for_status()
-        return r.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return {"error": "NO_ENCONTRADO", "mensaje": f"No existe: {path}"}
-        return {"error": f"Error del servidor: {e.response.status_code}"}
-    except httpx.TimeoutException:
-        return {"error": "La consulta tardó demasiado."}
-    except httpx.RequestError:
-        return {"error": "No se pudo conectar al servidor."}
+# Cuántos pedidos revisar para ubicar un documento. Un asesor pide facturas
+# recientes; buscar en el histórico completo de un cliente grande es caro y no
+# cambia el resultado en la práctica.
+PEDIDOS_A_REVISAR = 30
 
 
 def _norm(s: str) -> str:
@@ -78,32 +55,134 @@ async def ubicar(cliente_ruc: str, numero: str) -> dict:
     Busca también dentro de las notas de crédito de cada documento: una NC tiene
     su propio número y el asesor la pide igual que una factura.
     """
-    ped = await _get(f"/pedidos/{cliente_ruc}")
-    if not ped or ped.get("error"):
+    datos = await catusita_api.get(
+        "/api/sales/orders/documents",
+        {"ClientTaxId": cliente_ruc, "NumberOfOrders": PEDIDOS_A_REVISAR},
+    )
+    if isinstance(datos, dict) and datos.get("error"):
+        return {"error": "SIN_PEDIDOS",
+                "mensaje": "No se pudieron leer los pedidos del cliente."}
+    if not isinstance(datos, dict):
         return {"error": "SIN_PEDIDOS",
                 "mensaje": "No se pudieron leer los pedidos del cliente."}
 
     buscado = _norm(numero)
-    for p in ped.get("pedidos") or []:
-        for d in p.get("documentos") or []:
-            if _norm(d.get("numero")) == buscado:
-                return d
-            for nc in d.get("notas_credito") or []:
-                if _norm(nc.get("numero")) == buscado:
-                    return nc
+    for o in datos.get("orders") or []:
+        for d in o.get("salesDocuments") or []:
+            # 'FA/ F001-0073326' -> _norm lo deja 'FAF0010073326', que nunca
+            # coincide con lo que escribe el asesor. Se compara por el sufijo.
+            crudo = d.get("sunatDocumentNumber") or ""
+            limpio = crudo.split("/")[-1].strip()
+            if _norm(limpio) == buscado:
+                return {
+                    "numero": limpio,
+                    "tipo_codigo": d.get("documentType") or "01",
+                    "empresa_codigo": d.get("companyCode") or "",
+                    "empresa": d.get("companyName") or "",
+                    "fecha": d.get("documentDate") or "",
+                    "monto": d.get("amount"),
+                    "moneda": d.get("currency") or "",
+                }
+            for nc in d.get("creditNotes") or []:
+                crudo_nc = nc.get("sunatDocumentNumber") or ""
+                limpio_nc = crudo_nc.split("/")[-1].strip()
+                if _norm(limpio_nc) == buscado:
+                    return {
+                        "numero": limpio_nc,
+                        "tipo_codigo": nc.get("documentType") or "07",
+                        "empresa_codigo": nc.get("companyCode") or "",
+                        "empresa": nc.get("companyName") or "",
+                        "fecha": nc.get("documentDate") or "",
+                        "monto": nc.get("amount"),
+                        "moneda": nc.get("currency") or "",
+                    }
 
     return {"error": "DOC_NO_ENCONTRADO",
-            "mensaje": (f"El documento {numero} no aparece en los pedidos de ese "
-                        "cliente. Verificá el número o el cliente.")}
+            "mensaje": (f"El documento {numero} no aparece en los últimos "
+                        f"{PEDIDOS_A_REVISAR} pedidos de ese cliente. Verificá "
+                        "el número o el cliente.")}
 
 
 async def pdf(numero: str, tipo: str, empresa: str) -> dict:
-    return await _get("/documento",
-                      {"numero": numero, "tipo": tipo, "empresa": empresa},
-                      timeout=TIMEOUT_DESCARGA)
+    """El PDF del documento, descargado y en base64."""
+    datos = await catusita_api.get(
+        "/api/electronic-documents/search",
+        {"DocumentNumber": numero, "DocumentType": tipo, "CompanyCode": empresa},
+    )
+    if isinstance(datos, dict) and datos.get("error"):
+        return datos
+
+    filas = datos if isinstance(datos, list) else []
+    if not filas:
+        return {"error": "NO_ENCONTRADO",
+                "mensaje": f"No se encontró el documento electrónico {numero}."}
+
+    f = filas[0]
+    if not f.get("hasPdf") or not f.get("pdfUrl"):
+        return {"error": "SIN_PDF",
+                "mensaje": f"El documento {numero} no tiene PDF emitido."}
+
+    contenido = await catusita_api.descargar(f["pdfUrl"], timeout=TIMEOUT_DESCARGA)
+    if not contenido:
+        return {"error": "DESCARGA_FALLIDA",
+                "mensaje": f"No se pudo descargar el PDF de {numero}."}
+
+    return {
+        "numero": f.get("documentNumber") or numero,
+        "tipo": f.get("documentType") or "Documento",
+        "cliente": f.get("clientName") or "",
+        "empresa": f.get("companyName") or "",
+        "fecha": f.get("issueDate") or "",
+        "pdf_base64": base64.b64encode(contenido).decode(),
+        "filename": f"{f.get('documentNumber') or numero}.pdf",
+        "mime": "application/pdf",
+        "xml_url": f.get("xmlUrl") if f.get("hasXml") else "",
+    }
 
 
 async def pagos(numero: str, tipo: str, empresa: str) -> dict:
-    return await _get("/documento/pagos",
-                      {"numero": numero, "tipo": tipo, "empresa": empresa},
-                      timeout=20.0)
+    """Estado de pago: saldo, vencimiento, y si se canjeó por letras.
+
+    La API envuelve el detalle en `companies[].documents[]` porque el mismo
+    número puede existir en más de una empresa del grupo. Se aplana: al asesor
+    le importa el documento, no en qué sociedad quedó registrado.
+    """
+    datos = await catusita_api.get(
+        "/api/document-payment-application/search",
+        {"DocumentNumber": numero, "DocumentType": tipo, "CompanyCode": empresa},
+    )
+    if isinstance(datos, dict) and datos.get("error"):
+        return datos
+    if not isinstance(datos, dict):
+        return {"error": "RESPUESTA_INESPERADA",
+                "mensaje": "La API no devolvió el estado de pago como se esperaba."}
+
+    if not datos.get("found"):
+        return {"error": "NO_ENCONTRADO",
+                "mensaje": datos.get("message") or f"No se encontró {numero}."}
+
+    documentos = []
+    for c in datos.get("companies") or []:
+        for d in c.get("documents") or []:
+            documentos.append({
+                "numero": d.get("documentNumber") or "",
+                "tipo": d.get("documentTypeName") or "",
+                "empresa": d.get("companyName") or "",
+                "cliente": d.get("clientName") or "",
+                "moneda": d.get("currency") or "",
+                "monto_total": d.get("totalAmount"),
+                "monto_aplicado": d.get("appliedAmount"),
+                "saldo_pendiente": d.get("pendingBalance"),
+                "estado": d.get("documentStatus") or "",
+                "fecha_emision": d.get("issueDate") or "",
+                "fecha_vencimiento": d.get("dueDate") or "",
+                "canjeado_por_letras": bool(d.get("hasLetterExchange")),
+                "numero_canje": d.get("exchangeNumber") or "",
+            })
+
+    return {
+        "numero": numero,
+        "encontrado": True,
+        "mensaje": datos.get("message") or "",
+        "documentos": documentos,
+    }

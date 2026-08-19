@@ -1,125 +1,215 @@
-"""Acceso de `productos` (vendedores) a las BACKEND APIS.
+"""Acceso de `productos` (vendedores) a la API de Catusita.
 
-Cuatro endpoints y ninguno más:
+    GET /api/stock/filter?ItemCode=      cuánto hay
+    GET /api/price/filter?ItemCode=      cuánto vale
+    GET /api/article/filter?SearchText=  qué existe (y las fotos)
 
-    GET /stock/{sku}        cuánto hay
-    GET /precios/{sku}      cuánto vale
-    GET /catalogo?q=        qué existe
-    GET /imagen/{sku}       cómo se ve
-
-── Contra qué corre ───────────────────────────────────────────────────────────
-
-`SAP_BASE_URL` apunta hoy a `tools-agente-catusita`, que es el servicio real
-—no el Mock SAP—. El mock sigue desplegado en Railway pero ya no lo consulta
-nadie: quedó de la etapa anterior.
-
-Por eso NO hay default en el código. Si falta la variable, esto revienta al
-arrancar en vez de pegarle en silencio a un servidor con datos de prueba y
-contestarle a un asesor un stock que no existe.
-
-── Por qué su propio cliente y no uno compartido ──────────────────────────────
+── Por qué su propio backend y no uno compartido ──────────────────────────────
 
 Había un `shared/sap_client.py` con los 12 endpoints, y todas las áreas lo
-importaban. Eso significaba que `productos` podía llamar a `/vendedor/{id}/clientes`
-sin que nada lo impidiera: el método estaba ahí, a un punto de distancia.
+importaban. Eso significaba que `productos` podía llamar a la cartera de un
+asesor sin que nada lo impidiera: el método estaba ahí, a un punto de distancia.
 
 Acá no está. `productos` no tiene forma de consultar una cartera porque no
-existe el método en su backend. No es una regla que haya que recordar — es que
+existe la función en su backend. No es una regla que haya que recordar — es que
 el código no está.
 
-── El precio ──────────────────────────────────────────────────────────────────
+── El precio, y lo que cambió al ir directo ───────────────────────────────────
 
-`tipo` sale como parámetro y NO tiene default. Para vendedores puede ser "neto"
-o "lista"; para clientes solo "lista", y por eso el backend de clientes ni
-siquiera acepta el argumento. Un default acá sería la forma más fácil de que un
-precio neto se escape por el canal equivocado.
+El wrapper inventaba dos precios, "neto" y "lista". La API real no tiene esa
+distinción: tiene UNA lista de precios que depende de a qué cliente se le venda.
+
+    sin CodeClient   ->  priceListName: "LISTA_DEFECTO"   (el de mostrador)
+    con CodeClient   ->  priceListName: "LISTA_CLIENTE"   (el que le toca a él)
+
+Así que el precio del cliente sale mandando su código, y el genérico sale sin
+mandarlo. `priceListName` viaja hasta el modelo a propósito: es lo único que
+distingue un precio del otro, y sin eso el asesor no sabe cuál está cotizando.
+
+Cuidado con `CodeSeller`: mandarlo SIN `CodeClient` devuelve 500. Por eso solo
+se manda acompañado.
+
+── «No encontrado» es una lista vacía ─────────────────────────────────────────
+
+    /api/stock/filter?ItemCode=NOEXISTE   ->   200  {"data": [], "isValid": true}
+
+No es un 404 ni un error. Acá se traduce a `{"error": ...}` para que
+`servicio.con_sugerencias` lo detecte y ofrezca alternativas del catálogo.
+
+── Las fotos ──────────────────────────────────────────────────────────────────
+
+`article/filter` trae `images` como URLs a otro puerto (`:8086`), no como
+base64. WhatsApp necesita los bytes, así que se descargan acá. Es la única
+función del área que hace dos saltos de red, y por eso tiene su propio timeout.
 """
+import asyncio
+import base64
+import mimetypes
 import os
 
-import httpx
-from dotenv import load_dotenv
+from vendedores.plataforma_vendedores import catusita_api
 
-load_dotenv()
-
-# Sin default a propósito: ver la nota del encabezado.
-BASE_URL = os.getenv("SAP_BASE_URL", "")
-API_KEY = os.getenv("SAP_API_KEY", "")
-
-# Las imágenes se descargan enteras; el resto son consultas de datos.
-TIMEOUT = 10.0
 TIMEOUT_IMAGEN = 30.0
 
-_cliente: httpx.AsyncClient | None = None
+# Una consulta de catálogo puede traer decenas de artículos; al asesor le entran
+# unos pocos por WhatsApp. El corte es acá y no en el modelo para no gastar
+# contexto en 80 productos que no va a leer.
+MAX_CATALOGO = 25
 
 
-def _http() -> httpx.AsyncClient:
-    global _cliente
-    if _cliente is None:
-        if not BASE_URL:
-            raise RuntimeError(
-                "Falta SAP_BASE_URL. Hoy apunta a tools-agente-catusita; el Mock "
-                "SAP quedó de la etapa anterior y ya no se usa."
-            )
-        _cliente = httpx.AsyncClient(
-            base_url=BASE_URL, headers={"X-API-Key": API_KEY}, timeout=TIMEOUT
-        )
-    return _cliente
+def _articulo(fila: dict) -> dict:
+    return {
+        "sku": fila.get("itemCode") or "",
+        "nombre": fila.get("itemName") or "",
+        "marca": fila.get("brandName") or fila.get("nameSupply") or "",
+        "categoria": fila.get("subSpecialtyName") or fila.get("specialtyName") or "",
+        "codigo_proveedor": fila.get("supplierCatalogNumber") or "",
+        "aplicacion": fila.get("foreignName") or "",
+        "unidad": fila.get("inventoryUnitOfMeasure") or "",
+    }
 
 
-async def _get(path: str, params: dict | None = None, timeout: float | None = None) -> dict:
-    """GET con errores en castellano y sin excepciones hacia arriba.
-
-    Devuelve `{"error": ...}` en vez de lanzar: una caída de SAP tiene que
-    llegar al orquestador como un dato que puede explicarle al asesor, no como
-    una excepción que le tumba el turno.
-    """
-    try:
-        kwargs: dict = {"params": params}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        r = await _http().get(path, **kwargs)
-        r.raise_for_status()
-        return r.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return {"error": f"No encontrado: {path}"}
-        return {"error": f"Error del servidor SAP: {e.response.status_code}"}
-    except httpx.TimeoutException:
-        return {"error": "La consulta tardó demasiado. Inténtalo de nuevo en un momento."}
-    except httpx.RequestError:
-        return {"error": "No se pudo conectar al servidor SAP. Inténtalo en unos minutos."}
+def _lista(datos) -> list[dict] | dict:
+    """Normaliza la respuesta: lista de filas, o el `{"error": ...}` tal cual."""
+    if isinstance(datos, dict) and datos.get("error"):
+        return datos
+    return datos if isinstance(datos, list) else []
 
 
 async def stock(sku: str) -> dict:
-    return await _get(f"/stock/{sku}")
+    datos = _lista(await catusita_api.get("/api/stock/filter", {"ItemCode": sku}))
+    if isinstance(datos, dict):
+        return datos
+    if not datos:
+        return {"error": "PRODUCTO_NO_ENCONTRADO",
+                "mensaje": f"No existe ningún producto con el SKU '{sku}'."}
+
+    # Un SKU puede venir repetido, una fila por empresa del grupo.
+    total = 0.0
+    por_empresa = []
+    for f in datos:
+        try:
+            cantidad = float(f.get("stock") or 0)
+        except (TypeError, ValueError):
+            cantidad = 0.0
+        total += cantidad
+        por_empresa.append({"empresa": f.get("companyDefinition") or "",
+                            "cantidad": cantidad})
+
+    primera = datos[0]
+    return {
+        **_articulo(primera),
+        "stock_total": total,
+        "unidad": primera.get("inventoryUnitOfMeasure") or "",
+        "por_empresa": por_empresa,
+        "hay_stock": total > 0,
+    }
 
 
-async def precios(sku: str, tipo: str) -> dict:
-    """`tipo` es obligatorio: "neto" o "lista". Ver la nota del encabezado."""
-    return await _get(f"/precios/{sku}", params={"tipo": tipo})
+async def precios(sku: str, tipo: str, cliente_codigo: str | None = None) -> dict:
+    """Precio del SKU. Con `cliente_codigo` es el del cliente; sin él, el genérico.
+
+    `tipo` se mantiene en la firma porque las tools lo pasan, pero la API real no
+    distingue neto de lista: lo que distingue es si va o no el código de cliente.
+    Se devuelve `lista_precio` para que quede explícito cuál se está cotizando.
+    """
+    params = {"ItemCode": sku}
+    if cliente_codigo:
+        params["CodeClient"] = cliente_codigo
+
+    datos = _lista(await catusita_api.get("/api/price/filter", params))
+    if isinstance(datos, dict):
+        return datos
+    if not datos:
+        return {"error": "PRODUCTO_NO_ENCONTRADO",
+                "mensaje": f"No hay precio cargado para el SKU '{sku}'."}
+
+    f = datos[0]
+    return {
+        "sku": f.get("itemCode") or sku,
+        "precio": f.get("finalPrice"),
+        "moneda": f.get("currency") or "USD",
+        "lista_precio": f.get("priceListName") or "",
+        "es_precio_de_cliente": bool(cliente_codigo),
+    }
 
 
 async def catalogo(q: str | None = None, categoria: str | None = None,
                    marca: str | None = None, con_stock: bool | None = None) -> dict:
-    params: dict = {}
-    if q:
-        params["q"] = q
+    """Búsqueda de artículos. `categoria` y `con_stock` no existen en la API.
+
+    `categoria` se aplica acá, filtrando por `subSpecialtyName`/`specialtyName`,
+    porque la API no tiene ese parámetro pero sí devuelve el campo. `con_stock`
+    en cambio exigiría una consulta de stock por artículo, así que no se aplica
+    y se avisa — filtrar de mentira es peor que no filtrar.
+    """
+    datos = _lista(await catusita_api.get(
+        "/api/article/filter", {"SearchText": q, "BrandName": marca}))
+    if isinstance(datos, dict):
+        return datos
+
+    productos = [_articulo(f) for f in datos]
+
     if categoria:
-        params["categoria"] = categoria
-    if marca:
-        params["marca"] = marca
+        buscada = categoria.lower()
+        productos = [p for p in productos if buscada in (p["categoria"] or "").lower()]
+
+    resultado: dict = {
+        "total": len(productos),
+        "productos": productos[:MAX_CATALOGO],
+    }
+    if len(productos) > MAX_CATALOGO:
+        resultado["mensaje"] = (
+            f"Hay {len(productos)} coincidencias; se muestran las primeras "
+            f"{MAX_CATALOGO}. Si ninguna sirve, pedile al usuario que precise.")
     if con_stock is not None:
-        params["con_stock"] = str(con_stock).lower()
-    return await _get("/catalogo", params=params or None)
+        resultado["filtros_ignorados"] = {
+            "campos": ["con_stock"],
+            "mensaje": ("No se pudo filtrar por stock: hay que consultarlo SKU "
+                        "por SKU. Usá consultar_stock con los que interesen."),
+        }
+    return resultado
 
 
 async def imagen(sku: str) -> dict:
-    """Foto(s) del producto, ya descargadas en base64."""
-    return await _get(f"/imagen/{sku}", timeout=TIMEOUT_IMAGEN)
+    """Foto(s) del producto, descargadas y en base64.
+
+    Las URLs se bajan en paralelo: son dos o tres y secuencial suma latencia
+    sobre un turno de WhatsApp que ya viene de dos llamadas.
+    """
+    datos = _lista(await catusita_api.get("/api/article/filter", {"ItemCode": sku}))
+    if isinstance(datos, dict):
+        return datos
+    if not datos:
+        return {"error": "PRODUCTO_NO_ENCONTRADO",
+                "mensaje": f"No existe ningún producto con el SKU '{sku}'."}
+
+    fila = datos[0]
+    urls = [u for u in (fila.get("images") or []) if u]
+    if not urls:
+        return {"error": "SIN_IMAGEN",
+                "mensaje": f"El producto {sku} no tiene foto cargada."}
+
+    descargas = await asyncio.gather(
+        *(catusita_api.descargar(u, timeout=TIMEOUT_IMAGEN) for u in urls))
+
+    imagenes = []
+    for url, contenido in zip(urls, descargas):
+        if not contenido:
+            continue
+        nombre = os.path.basename(url) or f"{sku}.png"
+        imagenes.append({
+            "base64": base64.b64encode(contenido).decode(),
+            "filename": nombre,
+            "mime": mimetypes.guess_type(nombre)[0] or "image/png",
+        })
+
+    if not imagenes:
+        return {"error": "SIN_IMAGEN",
+                "mensaje": f"No se pudieron descargar las fotos de {sku}."}
+
+    return {"sku": sku, "nombre": fila.get("itemName") or "", "imagenes": imagenes}
 
 
 async def cerrar() -> None:
-    global _cliente
-    if _cliente is not None:
-        await _cliente.aclose()
-        _cliente = None
+    await catusita_api.close()

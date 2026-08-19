@@ -1,92 +1,46 @@
-"""Acceso de `productos` (clientes) a las BACKEND APIS.
+"""Acceso de `productos` (clientes) a la API de Catusita.
 
-Cuatro endpoints y ninguno más:
+    GET /api/stock/filter?ItemCode=      cuánto hay
+    GET /api/price/filter?ItemCode=      cuánto vale
+    GET /api/article/filter?SearchText=  qué existe (y las fotos)
 
-    GET /stock/{sku}        cuánto hay
-    GET /precios/{sku}      cuánto vale
-    GET /catalogo?q=        qué existe
-    GET /imagen/{sku}       cómo se ve
-
-Es un archivo distinto del de `vendedores` aunque peguen al MISMO endpoint. Esa
-duplicación es el punto, no un descuido: acá vive la frontera.
+Es un archivo distinto del de `vendedores` aunque peguen a los MISMOS endpoints.
+Esa duplicación es el punto, no un descuido: acá vive la frontera.
 
 ── La frontera es una ALLOWLIST, no una regla ─────────────────────────────────
 
 Cada respuesta se recorta a los campos permitidos, uno por uno. No se filtra
 «lo prohibido»: se copia «lo permitido».
 
-La diferencia importa. Con una blocklist, el día que el endpoint agregue
-`precio_neto` o `almacen`, el campo pasa derecho al modelo y de ahí al chat de
-un cliente — sin que nadie cambie una línea ni salte un test. Con allowlist, un
-campo nuevo simplemente no existe de este lado hasta que alguien decida
-agregarlo a mano.
+La diferencia importa. Con una blocklist, el día que el endpoint agregue un
+campo nuevo, pasa derecho al modelo y de ahí al chat de un cliente — sin que
+nadie cambie una línea ni salte un test. Con allowlist, un campo nuevo
+simplemente no existe de este lado hasta que alguien decida agregarlo a mano.
 
-Hoy `/stock` ni siquiera devuelve almacén y `/precios` devuelve lo mismo para
-`tipo=neto` y `tipo=lista`. Es decir: la protección todavía no protege de nada
-real. Por eso hay que escribirla AHORA — cuando el endpoint cambie, nadie se va
-a acordar de que este canal existía.
+Y al pasar del wrapper a la API directa la allowlist ya sirvió para algo: la
+respuesta de stock ahora trae `por_empresa`, o sea en qué sociedad del grupo
+está la mercadería. Ese campo no está en `_STOCK`, así que nunca salió por acá.
 
 ── El precio ──────────────────────────────────────────────────────────────────
 
-`precios()` no acepta el argumento `tipo` y manda `lista` fijo. En vendedores es
-un parámetro obligatorio sin default; acá directamente no está. Un default sería
-la forma más fácil de que un precio neto se escape por el canal equivocado; no
-tener el argumento es que no haya forma de pedirlo.
+`precios()` no acepta el argumento `cliente_codigo`. En vendedores sí lo acepta,
+y esa es toda la diferencia entre los dos precios que devuelve la API:
+
+    sin CodeClient  ->  LISTA_DEFECTO   (el de mostrador, público)
+    con CodeClient  ->  LISTA_CLIENTE   (el negociado, interno)
+
+No tener el argumento es que no haya forma de pedir el segundo desde este canal.
+No es un default prudente — es que la llamada no se puede escribir.
 """
+import asyncio
+import base64
+import mimetypes
 import os
 
-import httpx
-from dotenv import load_dotenv
+from clientes.plataforma_clientes import catusita_api
 
-load_dotenv()
-
-# Sin default a propósito: mejor reventar al arrancar que pegarle en silencio a
-# un servidor de prueba y contestarle a un cliente un stock que no existe.
-BASE_URL = os.getenv("SAP_BASE_URL", "")
-API_KEY = os.getenv("SAP_API_KEY", "")
-
-TIMEOUT = 10.0
 TIMEOUT_IMAGEN = 30.0
-
-_cliente: httpx.AsyncClient | None = None
-
-
-def _http() -> httpx.AsyncClient:
-    global _cliente
-    if _cliente is None:
-        if not BASE_URL:
-            raise RuntimeError(
-                "Falta SAP_BASE_URL. Hoy apunta a tools-agente-catusita; el Mock "
-                "SAP quedó de la etapa anterior y ya no se usa."
-            )
-        _cliente = httpx.AsyncClient(
-            base_url=BASE_URL, headers={"X-API-Key": API_KEY}, timeout=TIMEOUT
-        )
-    return _cliente
-
-
-async def _get(path: str, params: dict | None = None, timeout: float | None = None) -> dict:
-    """GET con errores en castellano y sin excepciones hacia arriba.
-
-    Devuelve `{"error": ...}` en vez de lanzar: una caída del backend tiene que
-    llegar al orquestador como un dato que puede explicarle al cliente, no como
-    una excepción que le tumba el turno.
-    """
-    try:
-        kwargs: dict = {"params": params}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        r = await _http().get(path, **kwargs)
-        r.raise_for_status()
-        return r.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return {"error": f"No encontrado: {path}"}
-        return {"error": f"Error del servidor: {e.response.status_code}"}
-    except httpx.TimeoutException:
-        return {"error": "La consulta tardó demasiado. Inténtalo de nuevo en un momento."}
-    except httpx.RequestError:
-        return {"error": "No se pudo conectar al servidor. Inténtalo en unos minutos."}
+MAX_CATALOGO = 15
 
 
 def _recortar(datos: dict, permitidos: tuple) -> dict:
@@ -106,46 +60,125 @@ _PRECIO = ("sku", "precio_lista", "moneda")
 _PRODUCTO = ("sku", "nombre", "categoria", "marca")
 
 
+def _lista(datos) -> list[dict] | dict:
+    if isinstance(datos, dict) and datos.get("error"):
+        return datos
+    return datos if isinstance(datos, list) else []
+
+
 async def stock(sku: str) -> dict:
-    """Si hay o no. NO devuelve la cantidad exacta ni el almacén.
+    """Si hay o no. NO devuelve la cantidad exacta ni en qué empresa está.
 
     La cantidad se omite a propósito: a un cliente le sirve saber si puede pasar
     a buscarlo, y el número exacto es información de inventario que además
     envejece mal — se la damos y a la hora ya no es cierta.
     """
-    return _recortar(await _get(f"/stock/{sku}"), _STOCK)
+    datos = _lista(await catusita_api.get("/api/stock/filter", {"ItemCode": sku}))
+    if isinstance(datos, dict):
+        return datos
+    if not datos:
+        return {"error": "PRODUCTO_NO_ENCONTRADO",
+                "mensaje": f"No encontramos ningún producto con el código '{sku}'."}
+
+    total = 0.0
+    for f in datos:
+        try:
+            total += float(f.get("stock") or 0)
+        except (TypeError, ValueError):
+            pass
+
+    primera = datos[0]
+    return _recortar({
+        "sku": primera.get("itemCode") or sku,
+        "nombre": primera.get("itemName") or "",
+        "marca": primera.get("brandName") or primera.get("nameSupply") or "",
+        "unidad": primera.get("inventoryUnitOfMeasure") or "",
+        "disponible": total > 0,
+    }, _STOCK)
 
 
 async def precios(sku: str) -> dict:
-    """Precio de LISTA. Sin argumento `tipo`: ver la nota del encabezado."""
-    return _recortar(await _get(f"/precios/{sku}", params={"tipo": "lista"}), _PRECIO)
+    """Precio de LISTA. Sin `cliente_codigo`: ver la nota del encabezado."""
+    datos = _lista(await catusita_api.get("/api/price/filter", {"ItemCode": sku}))
+    if isinstance(datos, dict):
+        return datos
+    if not datos:
+        return {"error": "PRODUCTO_NO_ENCONTRADO",
+                "mensaje": f"No hay precio publicado para el código '{sku}'."}
+
+    f = datos[0]
+    return _recortar({
+        "sku": f.get("itemCode") or sku,
+        "precio_lista": f.get("finalPrice"),
+        "moneda": f.get("currency") or "USD",
+    }, _PRECIO)
 
 
 async def catalogo(q: str | None = None, categoria: str | None = None,
                    marca: str | None = None) -> dict:
-    params: dict = {}
-    if q:
-        params["q"] = q
-    if categoria:
-        params["categoria"] = categoria
-    if marca:
-        params["marca"] = marca
-
-    datos = await _get("/catalogo", params=params or None)
-    if not isinstance(datos, dict) or datos.get("error"):
+    datos = _lista(await catusita_api.get(
+        "/api/article/filter", {"SearchText": q, "BrandName": marca}))
+    if isinstance(datos, dict):
         return datos
-    return {
-        "productos": [_recortar(p, _PRODUCTO) for p in (datos.get("productos") or [])]
-    }
+
+    productos = [
+        _recortar({
+            "sku": f.get("itemCode") or "",
+            "nombre": f.get("itemName") or "",
+            "categoria": f.get("subSpecialtyName") or f.get("specialtyName") or "",
+            "marca": f.get("brandName") or f.get("nameSupply") or "",
+        }, _PRODUCTO)
+        for f in datos
+    ]
+
+    if categoria:
+        buscada = categoria.lower()
+        productos = [p for p in productos
+                     if buscada in (p.get("categoria") or "").lower()]
+
+    return {"productos": productos[:MAX_CATALOGO]}
 
 
 async def imagen(sku: str) -> dict:
-    """Foto(s) del producto, ya descargadas en base64."""
-    return await _get(f"/imagen/{sku}", timeout=TIMEOUT_IMAGEN)
+    """Foto(s) del producto, descargadas y en base64.
+
+    No pasa por `_recortar`: lo que devuelve son bytes de una imagen y su nombre
+    de archivo, no datos del negocio. La allowlist protege campos, y acá no hay
+    ninguno que pueda filtrar información interna.
+    """
+    datos = _lista(await catusita_api.get("/api/article/filter", {"ItemCode": sku}))
+    if isinstance(datos, dict):
+        return datos
+    if not datos:
+        return {"error": "PRODUCTO_NO_ENCONTRADO",
+                "mensaje": f"No encontramos ningún producto con el código '{sku}'."}
+
+    fila = datos[0]
+    urls = [u for u in (fila.get("images") or []) if u]
+    if not urls:
+        return {"error": "SIN_IMAGEN",
+                "mensaje": f"El producto {sku} no tiene foto disponible."}
+
+    descargas = await asyncio.gather(
+        *(catusita_api.descargar(u, timeout=TIMEOUT_IMAGEN) for u in urls))
+
+    imagenes = []
+    for url, contenido in zip(urls, descargas):
+        if not contenido:
+            continue
+        nombre = os.path.basename(url) or f"{sku}.png"
+        imagenes.append({
+            "base64": base64.b64encode(contenido).decode(),
+            "filename": nombre,
+            "mime": mimetypes.guess_type(nombre)[0] or "image/png",
+        })
+
+    if not imagenes:
+        return {"error": "SIN_IMAGEN",
+                "mensaje": f"No se pudieron descargar las fotos de {sku}."}
+
+    return {"sku": sku, "nombre": fila.get("itemName") or "", "imagenes": imagenes}
 
 
 async def cerrar() -> None:
-    global _cliente
-    if _cliente is not None:
-        await _cliente.aclose()
-        _cliente = None
+    await catusita_api.close()
