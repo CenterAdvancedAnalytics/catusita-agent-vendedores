@@ -40,7 +40,7 @@ import os
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from recepcion import acumulador, router as ruteo, waha
+from recepcion import acumulador, router as ruteo, waha, yahuar
 
 router_webhook = APIRouter()
 
@@ -98,9 +98,31 @@ async def recibir(request: Request, x_api_key: str = Header("")) -> dict:
     # mapeo: un LID solo existe dentro de la sesión que lo vio.
     # `payload["from"]` queda intacto y es lo que se usa para responder: si el
     # contacto se presentó como LID, hay que contestarle al LID.
+    crudo = remitente
     if "@lid" in remitente:
         if tel := await waha.resolve_lid_to_phone(remitente, session):
             remitente = tel
+
+    # ── Yahuar sale del flujo ANTES del padrón ───────────────────────────────
+    #
+    # Es el relay de placas: un servicio contestando, no una persona escribiendo.
+    # Su número no está en ningún padrón, así que si llegara acá el router lo
+    # mandaría a `clientes` y el agente de clientes le contestaría a Yahuar
+    # mientras el vendedor que pidió la placa se queda esperando.
+    #
+    # Se le pasan las dos formas del remitente: si la traducción de LID funcionó
+    # coincide por teléfono, y si no, por LID.
+    if await yahuar.es_yahuar(crudo, remitente):
+        await yahuar.encolar(payload, crudo)
+        logging.info(f"[yahuar] respuesta del relay ({crudo}) -> yahuar:entrantes")
+        return {"status": "aceptado", "destino": "yahuar"}
+
+    # Y si es Yahuar con un LID que todavía no conocíamos: se aprende una vez y
+    # a partir de ahí entra por la rama de arriba. Ver la nota en `yahuar.py`
+    # sobre por qué no alcanza con «hay una placa en vuelo».
+    if await yahuar.aprender_si_corresponde(payload, crudo):
+        await yahuar.encolar(payload, crudo)
+        return {"status": "aceptado", "destino": "yahuar", "lid": "aprendido"}
 
     destino = await ruteo.resolver(remitente, session)
     logging.info(
