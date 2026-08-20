@@ -37,30 +37,65 @@ async def _nodo_delegar(state):
     en el mismo paso, y acá el resultado recién existe cuando el área terminó de
     trabajar — puede tardar un minuto. Quien responde el `tool_use` es el área.
 
-    Si el orquestador pidió varias áreas de una, se atiende la PRIMERA y las
-    demás quedan sin responder. Eso rompería la conversación, así que el prompt
-    le pide una por vez; acá se registra si igual manda varias.
+    ── Cuando pide varias áreas de una ────────────────────────────────────────
+
+    Se atiende la PRIMERA y a las demás se les contesta acá mismo con un
+    ToolMessage que dice que no se atendieron.
+
+    Ese ToolMessage no es cortesía: es obligatorio. La API de Anthropic exige
+    que todo `tool_use` tenga su `tool_result` en el mensaje siguiente, y si
+    falta uno rechaza la conversación ENTERA:
+
+        messages.2: `tool_use` ids were found without `tool_result` blocks
+        immediately after: toolu_01G8Lmjf...
+
+    Antes esto solo se logueaba, y el turno moría con un 400 que no se parecía
+    en nada a su causa. Pasaba de verdad: «mandame la factura F001-... de tal
+    cliente» hace que el orquestador pida `clientes` y `facturacion` juntas, y
+    el asesor recibía un error. Tres de catorce consultas de la guía morían así.
+
+    El prompt le pide una por vez, pero un prompt no es una garantía — y el
+    costo de que falle es el turno completo.
     """
     ultimo = state["messages"][-1]
     llamadas = getattr(ultimo, "tool_calls", None) or []
     if not llamadas:
         return Command(goto="orquestador")
 
-    if len(llamadas) > 1:
-        logging.warning(
-            f"[delegar] el orquestador pidió {len(llamadas)} áreas de una: "
-            f"{[c.get('name') for c in llamadas]}. Se atiende la primera."
-        )
+    primera, resto = llamadas[0], llamadas[1:]
 
-    llamada = llamadas[0]
-    area = registro.area_de_tool(llamada.get("name", ""))
+    area = registro.area_de_tool(primera.get("name", ""))
     if not area:
         return Command(goto="orquestador")
 
-    return Command(goto=area, update={"encargo": {
-        "consulta": (llamada.get("args") or {}).get("consulta", ""),
-        "tool_call_id": llamada.get("id", ""),
-    }})
+    # Las que no se atienden se cierran ya, para no dejar `tool_use` huérfanos.
+    sobrantes = []
+    if resto:
+        logging.warning(
+            f"[delegar] el orquestador pidió {len(llamadas)} áreas de una: "
+            f"{[c.get('name') for c in llamadas]}. Se atiende {primera.get('name')!r} "
+            f"y se responden las otras como no atendidas."
+        )
+        sobrantes = [
+            ToolMessage(
+                tool_call_id=c.get("id", ""),
+                content=(
+                    "No se atendió: solo se puede consultar un área por vez. "
+                    "Primero se está atendiendo "
+                    f"{primera.get('name', '')!r}. Cuando tengas ese resultado, "
+                    "si todavía necesitás esta, pedila de nuevo sola."
+                ),
+            )
+            for c in resto
+        ]
+
+    return Command(goto=area, update={
+        "messages": sobrantes,
+        "encargo": {
+            "consulta": (primera.get("args") or {}).get("consulta", ""),
+            "tool_call_id": primera.get("id", ""),
+        },
+    })
 
 
 def _envolver_area(nombre: str, subgrafo):

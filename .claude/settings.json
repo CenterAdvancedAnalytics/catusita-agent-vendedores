@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python \"C:/Users/Gabriel1/AppData/Local/Temp/claude/c--Users-Gabriel1-Desktop-PROYECTOS-PROGRAMACION-2025-CAA-catusita-clientes-2026/9b583a37-d9a8-4c9e-8580-dd6336b87cba/scratchpad/t_guia.py\")",
+      "Bash(python -c ' *)",
+      "Bash(python \"C:/Users/Gabriel1/AppData/Local/Temp/claude/c--Users-Gabriel1-Desktop-PROYECTOS-PROGRAMACION-2025-CAA-catusita-clientes-2026/9b583a37-d9a8-4c9e-8580-dd6336b87cba/scratchpad/t_guia3.py\")"
+    ]
+  }
+}
