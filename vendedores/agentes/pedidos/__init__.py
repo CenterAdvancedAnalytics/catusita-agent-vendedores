@@ -23,7 +23,9 @@ DESCRIPCION = (
     "SUNAT, notas de crédito, guía de remisión y si ya se entregó.\n"
     "Le pasás el cliente por NOMBRE o RUC y ella lo resuelve dentro de la cartera "
     "del asesor — no hace falta consultar `clientes` antes.\n"
-    "NO tiene: historial de compras, totales de venta ni acumulados por período."
+    "También QUÉ PRODUCTOS compra un cliente: lo que más lleva, en unidades y "
+    "en plata, sacado del detalle de sus facturas.\n"
+    "NO tiene: totales de venta de la cartera ni acumulados por período."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]

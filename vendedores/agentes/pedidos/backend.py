@@ -27,11 +27,21 @@ El asesor escribe `F001-0073326`. Si se compara crudo no coincide nunca, y el
 síntoma es «no encuentro esa factura» sobre una factura que está ahí. Por eso
 `_numero_sunat` corta el prefijo y `facturacion.ubicar` compara contra eso.
 """
+import asyncio
+
+from vendedores.agentes.pedidos import comprobantes
 from vendedores.plataforma_vendedores import catusita_api
 
 # Cuántos pedidos traer cuando nadie dice cuántos. La API pide el número; sin
 # tope devolvería el histórico entero de un cliente de veinte años.
 PEDIDOS_POR_DEFECTO = 20
+
+# Los XML viven en otro puerto y son de ~20 KB cada uno.
+TIMEOUT_XML = 30.0
+
+# Cuántos productos devolver en cada ranking. Es lo que entra en un WhatsApp;
+# el modelo igual tiene las líneas crudas si necesita re-cortar.
+MAX_PRODUCTOS = 10
 
 
 def _numero_sunat(valor: str) -> str:
@@ -108,6 +118,132 @@ async def pedidos(cliente_ruc: str, estado: str | None = None,
         "total_pedidos": len(lista),
         "pedidos": lista,
     }
+
+
+async def compras(cliente_ruc: str, cantidad: int = 20) -> dict:
+    """Qué productos compró un cliente, sacados del XML de sus facturas.
+
+    ── Por qué existe y por qué es la única que hace tres saltos ──────────────
+
+    Ningún endpoint devuelve el detalle de un pedido: `/api/sales/orders/documents`
+    da el monto total y nada más. Por eso «¿qué compra más este cliente?» estaba
+    anotado como imposible en docs/pendientes_ventas.md.
+
+    Está en el XML de la factura electrónica, que por ley SUNAT trae las líneas.
+    Llegar ahí son tres saltos encadenados:
+
+        1. los pedidos del cliente          -> sus facturas
+        2. cada factura                     -> su xmlUrl
+        3. el XML                           -> SKU, unidades, importe
+
+    Medido sobre un cliente real: 10 pedidos, 12 facturas, 62 líneas, 1.2 s.
+
+    ── Por qué devuelve las líneas Y los totales ──────────────────────────────
+
+    Los totales se suman ACÁ, en Python. El modelo no suma: se equivoca en
+    aritmética y un total mal calculado sale con toda la cara de verdad —
+    «tu cliente compró USD 1.801 de Valvoline» y es mentira.
+
+    Las líneas van igual para que el modelo pueda re-cortar sin una tool nueva:
+    «¿y solo Valvoline?», «¿y del último mes?» se contestan con lo que ya tiene.
+    """
+    pedidos_ = await pedidos(cliente_ruc, cantidad=cantidad)
+    if pedidos_.get("error"):
+        return pedidos_
+
+    # Los documentos de todos sus pedidos, y qué notas de crédito hay.
+    docs, notas = [], 0
+    for p in pedidos_.get("pedidos") or []:
+        for d in p.get("documentos") or []:
+            if d.get("numero"):
+                docs.append((d["numero"], d.get("tipo_codigo") or "01",
+                             d.get("empresa_codigo") or "", p.get("fecha", "")))
+            notas += len(d.get("notas_credito") or [])
+
+    if not docs:
+        return {"cliente": pedidos_.get("cliente", ""), "ruc": cliente_ruc,
+                "pedidos_revisados": pedidos_.get("total_pedidos", 0),
+                "error": "SIN_FACTURAS",
+                "mensaje": ("Ese cliente no tiene facturas con detalle en los "
+                            "últimos pedidos, así que no se puede saber qué "
+                            "productos compró. No lo deduzcas de los montos.")}
+
+    # Las URLs de los XML. Una consulta por documento, en paralelo: son de
+    # `electronic-documents`, que sí tolera concurrencia.
+    urls = await asyncio.gather(*(_url_xml(n, t, e) for n, t, e, _ in docs))
+
+    # Los XML se bajan del :8086, que manda un header con espacio en el nombre.
+    # Solo `catusita_api.descargar` (urllib, en un hilo) lo tolera.
+    xmls = await asyncio.gather(
+        *(catusita_api.descargar(u, timeout=TIMEOUT_XML) for u in urls if u))
+
+    por_sku: dict[str, dict] = {}
+    total_lineas = 0
+    for crudo in xmls:
+        if not crudo:
+            continue
+        for l in comprobantes.lineas(crudo.decode("utf-8", errors="replace")):
+            total_lineas += 1
+            clave = l["sku"] or l["descripcion"][:40]
+            acum = por_sku.setdefault(clave, {
+                "sku": l["sku"], "descripcion": l["descripcion"],
+                "unidades": 0.0, "monto": 0.0, "moneda": l["moneda"]})
+            acum["unidades"] += l["unidades"]
+            acum["monto"] += l["monto"]
+
+    if not por_sku:
+        return {"cliente": pedidos_.get("cliente", ""), "ruc": cliente_ruc,
+                "error": "SIN_DETALLE",
+                "mensaje": "No se pudo leer el detalle de sus facturas."}
+
+    productos = sorted(por_sku.values(), key=lambda x: -x["monto"])
+    for p in productos:
+        p["monto"] = round(p["monto"], 2)
+        p["unidades"] = round(p["unidades"], 1)
+
+    # Si una factura vino en soles y otra en dólares, sumarlas sería inventar
+    # un número. Se avisa en vez de mezclar.
+    monedas = {p["moneda"] for p in productos if p["moneda"]}
+
+    resultado = {
+        "cliente": pedidos_.get("cliente", ""),
+        "ruc": cliente_ruc,
+        "moneda": monedas.pop() if len(monedas) == 1 else "",
+        "pedidos_revisados": pedidos_.get("total_pedidos", 0),
+        "facturas_leidas": sum(1 for x in xmls if x),
+        "lineas": total_lineas,
+        # Los dos ordenamientos, ya sumados. El modelo elige cuál mostrar.
+        "por_monto": productos[:MAX_PRODUCTOS],
+        "por_unidades": sorted(productos, key=lambda x: -x["unidades"])[:MAX_PRODUCTOS],
+    }
+
+    if len(monedas) > 1:
+        resultado["ojo_monedas"] = {
+            "monedas": sorted(monedas),
+            "mensaje": ("Hay facturas en más de una moneda y los montos están "
+                        "sumados sin convertir. Usá el ranking por UNIDADES, "
+                        "que sí es comparable, y avisá del problema."),
+        }
+
+    if notas:
+        resultado["ojo_notas_credito"] = {
+            "cantidad": notas,
+            "mensaje": (f"Hay {notas} nota(s) de crédito en esos pedidos. Estos "
+                        "totales NO las descuentan, así que puede haber "
+                        "mercadería devuelta contada como vendida. Decíselo."),
+        }
+    return resultado
+
+
+async def _url_xml(numero: str, tipo: str, empresa: str) -> str:
+    """El `xmlUrl` de una factura. Cadena vacía si no tiene."""
+    datos = await catusita_api.get("/api/electronic-documents/search",
+                                   {"DocumentNumber": numero,
+                                    "DocumentType": tipo, "CompanyCode": empresa})
+    if not isinstance(datos, list) or not datos:
+        return ""
+    d = datos[0]
+    return d.get("xmlUrl", "") if d.get("hasXml") else ""
 
 
 async def despacho(pedido_id: str | None = None,

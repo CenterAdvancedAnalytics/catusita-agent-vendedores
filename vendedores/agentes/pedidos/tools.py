@@ -36,6 +36,44 @@ async def consultar_pedidos(
 
 
 @tool
+async def consultar_compras(
+    cliente: str,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    pedidos: Optional[int] = None,
+) -> Command:
+    """QUÉ PRODUCTOS compra un cliente: lo que más lleva y de qué marca.
+
+    Para «¿qué le vendo más?», «¿qué suele llevar?», «¿qué marca prefiere?»,
+    «¿en qué gasta más?». `cliente` es el RUC o el nombre.
+
+    ── Cómo leer lo que devuelve ──────────────────────────────────────────────
+
+    `por_monto` y `por_unidades` son el MISMO conjunto ordenado distinto, y no
+    dan lo mismo: un foco puede ser 6º en plata y 1º en cantidad.
+
+      · el asesor quiere saber qué reponerle  ->  por_unidades
+      · quiere saber dónde está la plata      ->  por_monto
+
+    Si no se entiende de la pregunta, mostrá `por_monto` y ofrecé el otro en una
+    línea. No lo hagas escribir de nuevo por algo que ya se entendía.
+
+    Los totales YA vienen sumados: no los recalcules ni los estimes. Podés
+    filtrar y reordenar lo que te llega, pero los números salen de acá.
+
+    Deci siempre sobre cuántos pedidos se calculó: «compra Valvoline» no
+    significa nada sin «en sus últimos 10 pedidos».
+
+    Es lo que YA compró, no una predicción. Que el asesor decida qué le ofrece."""
+    ruc, error = await acceso.verificar(cliente, state.get("perfil") or {})
+    if error:
+        return _responder(error, tool_call_id)
+    return _responder(
+        await backend.compras(ruc, cantidad=pedidos or backend.PEDIDOS_POR_DEFECTO),
+        tool_call_id)
+
+
+@tool
 async def consultar_despacho(
     tool_call_id: Annotated[str, InjectedToolCallId],
     pedido_id: Optional[str] = None,
@@ -55,4 +93,4 @@ async def consultar_despacho(
     return _responder(await backend.despacho(pedido_id, factura), tool_call_id)
 
 
-TOOLS = [consultar_pedidos, consultar_despacho]
+TOOLS = [consultar_pedidos, consultar_compras, consultar_despacho]
