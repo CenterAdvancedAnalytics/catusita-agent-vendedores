@@ -49,7 +49,35 @@ BASE_URL = os.getenv("CATUSITA_API_URL", "http://api.catusita.com:8092")
 
 TIMEOUT = 20.0
 
+# ── Endpoints que NO toleran dos llamadas a la vez ─────────────────────────────
+#
+# El controlador de `sales/orders` se pisa a sí mismo. Medido, 24 consultas:
+#
+#     en serie      0 errores       2.03s
+#     de a 2       83% error 500    0.30s
+#     de a 6       96% error 500    0.10s
+#
+# Y es POR ENDPOINT, no global: dos llamadas simultáneas a endpoints distintos
+# responden 200 las dos. `stock`, `price`, `article` y `client` aguantan
+# paralelo sin problema; estos dos no.
+#
+# Importa mucho más de lo que parece, porque nadie escribe estas llamadas en
+# paralelo a propósito: LangGraph ejecuta las tool calls de un mismo turno
+# concurrentemente. Un asesor que pregunta por dos clientes a la vez disparaba
+# dos `consultar_pedidos` y uno volvía con error 500 — sin que nada en el código
+# del área insinuara que eso podía pasar.
+#
+# El lock es por proceso, así que no cubre a los tres workers pegándole juntos.
+# Ese caso queda para el reintento de abajo; lo que se elimina acá es el choque
+# de un turno consigo mismo, que es el que pasa siempre.
+SERIALIZADOS = ("/api/sales/orders",)
+
+# Pausa antes del único reintento ante un 500. Corta a propósito: el turno de
+# WhatsApp está esperando del otro lado.
+ESPERA_REINTENTO = 0.4
+
 _http: httpx.AsyncClient | None = None
+_lock_series = asyncio.Lock()
 
 
 def _cliente() -> httpx.AsyncClient:
@@ -57,6 +85,10 @@ def _cliente() -> httpx.AsyncClient:
     if _http is None:
         _http = httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT)
     return _http
+
+
+def _hay_que_serializar(path: str) -> bool:
+    return path.startswith(SERIALIZADOS)
 
 
 async def get(path: str, params: dict | None = None,
@@ -68,29 +100,52 @@ async def get(path: str, params: dict | None = None,
     vacío es la forma más fácil de provocarlo sin darse cuenta.
     """
     limpios = {k: v for k, v in (params or {}).items() if v not in (None, "")}
-    try:
-        r = await _cliente().get(path, params=limpios or None,
-                                 timeout=timeout or TIMEOUT)
-        r.raise_for_status()
-        cuerpo = r.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return {"error": "NO_ENCONTRADO", "mensaje": f"No existe: {path}"}
-        return {"error": f"Error del servidor: {e.response.status_code}"}
-    except httpx.TimeoutException:
-        return {"error": "La consulta tardó demasiado."}
-    except httpx.RequestError:
-        return {"error": "No se pudo conectar al servidor."}
-    except ValueError:
-        return {"error": "La API devolvió algo que no es JSON."}
 
+    if _hay_que_serializar(path):
+        async with _lock_series:
+            return await _pedir(path, limpios, timeout)
+    return await _pedir(path, limpios, timeout)
+
+
+async def _pedir(path: str, params: dict, timeout: float | None) -> dict | list:
+    """Una llamada, con UN reintento si el servidor devuelve 500.
+
+    El 500 de esta API es casi siempre por concurrencia, y el lock de arriba solo
+    cubre a un proceso: los tres workers le pegan por separado. Un reintento con
+    una pausa corta alcanza para eso. Dos ya sería insistirle a un servidor que
+    está en problemas.
+    """
+    for intento in (1, 2):
+        try:
+            r = await _cliente().get(path, params=params or None,
+                                     timeout=timeout or TIMEOUT)
+            r.raise_for_status()
+            return _desenvolver(r.json())
+        except httpx.HTTPStatusError as e:
+            codigo = e.response.status_code
+            if codigo == 404:
+                return {"error": "NO_ENCONTRADO", "mensaje": f"No existe: {path}"}
+            if codigo >= 500 and intento == 1:
+                await asyncio.sleep(ESPERA_REINTENTO)
+                continue
+            return {"error": f"Error del servidor: {codigo}"}
+        except httpx.TimeoutException:
+            return {"error": "La consulta tardó demasiado."}
+        except httpx.RequestError:
+            return {"error": "No se pudo conectar al servidor."}
+        except ValueError:
+            return {"error": "La API devolvió algo que no es JSON."}
+
+    return {"error": "Error del servidor: 500"}
+
+
+def _desenvolver(cuerpo) -> dict | list:
+    """Saca el `data` del sobre `{data, isValid, messages}`."""
     if not isinstance(cuerpo, dict) or "data" not in cuerpo:
         return cuerpo
-
     if cuerpo.get("isValid") is False:
         msgs = "; ".join(m.get("message", "") for m in (cuerpo.get("messages") or []))
         return {"error": msgs or "La API rechazó la consulta."}
-
     return cuerpo.get("data")
 
 
