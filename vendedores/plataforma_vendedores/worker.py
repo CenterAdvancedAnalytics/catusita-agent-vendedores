@@ -225,7 +225,28 @@ def _mensaje_del_usuario(turno):
         and (m.get("mimetype") or "").split(";")[0].strip() in IMAGENES
     ]
     if not adjuntos:
-        return HumanMessage(content=turno.texto)
+        # ── Un mensaje sin texto NO puede llegar vacío al modelo ──────────────
+        #
+        # Anthropic rechaza la conversación entera:
+        #
+        #     messages.2: user messages must have non-empty content
+        #
+        # y el turno muere en 158 ms sin que nada indique que la causa fue un
+        # sticker. Pasa seguido: audios, stickers, fotos sin epígrafe, o una
+        # respuesta de un solo emoji.
+        #
+        # Se reemplaza por una descripción de lo que llegó, para que el
+        # orquestador pueda contestar algo con sentido en vez de reventar.
+        if turno.texto:
+            return HumanMessage(content=turno.texto)
+
+        cuantos = len(turno.media or [])
+        return HumanMessage(content=(
+            f"(el usuario mandó {cuantos} archivo(s) que no puedo ver, sin texto)"
+            if cuantos else
+            "(el usuario mandó un mensaje sin texto: puede ser un audio, un "
+            "sticker o una nota de voz)"
+        ))
 
     descartados = len(turno.media or []) - len(adjuntos)
     if descartados:
