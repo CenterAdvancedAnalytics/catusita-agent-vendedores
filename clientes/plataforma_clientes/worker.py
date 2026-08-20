@@ -39,6 +39,7 @@ import time
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from clientes import chat
 from clientes.plataforma_clientes import colas
 from clientes.plataforma_clientes import db
 from clientes.plataforma_clientes.nodos import contexto
@@ -249,6 +250,30 @@ def _mensaje_del_usuario(turno):
     return HumanMessage(content=[{"type": "text", "text": turno.texto or " "}] + adjuntos)
 
 
+async def _persistir(turno, respuesta: str, tools: list, perfil: dict,
+                     res_ms: int | None) -> None:
+    """Escribe el par usuario/asistente en la tabla del multiagente.
+
+    Nunca lanza. Si Postgres está caído, se pierde el registro de ese turno y se
+    anota en el log — pero el asesor ya recibió su respuesta y eso es lo que
+    importa. Que la telemetría pueda tumbar una conversación sería el peor
+    intercambio posible.
+    """
+    try:
+        vid = perfil.get("vendedor_id")
+        nombre = perfil.get("nombre")
+        if turno.texto:
+            await chat.guardar(turno.conversacion, "user", turno.texto,
+                               vendedor_id=vid, vendedor_nombre=nombre,
+                               tipo="imagen" if turno.media else "texto")
+        if respuesta:
+            await chat.guardar(turno.conversacion, "assistant", respuesta,
+                               vendedor_id=vid, vendedor_nombre=nombre,
+                               tools=tools or [], latencia_ms=res_ms)
+    except Exception as e:
+        logging.error(f"[chat] no se pudo persistir el turno {turno.conversacion}: {e}")
+
+
 async def _correr_turno(grafo, turno) -> Resultado:
     """Corre el grafo entero para un turno y arma la respuesta.
 
@@ -268,6 +293,7 @@ async def _correr_turno(grafo, turno) -> Resultado:
     áreas y algún reintento de validación, 20 alcanza de sobra. Es el freno para
     que un loop de delegaciones no queme la API key.
     """
+    arranque = time.time()
     numero = turno.conversacion
     perfil = await _perfil(numero)
 
@@ -297,6 +323,21 @@ async def _correr_turno(grafo, turno) -> Resultado:
     await contexto.guardar(numero, "user", turno.texto)
     if texto:
         await contexto.guardar(numero, "assistant", texto)
+
+    # ── Y en Postgres, que es lo que sobrevive ───────────────────────────────
+    #
+    # Redis es la memoria del agente: diez mensajes con TTL de dos horas. Sirve
+    # para que la conversación tenga hilo, no para tener registro.
+    #
+    # Sin esto, `chat_messages_clientes` se quedó sin una sola fila desde el
+    # corte: el panel dejó de ver conversaciones y —lo que más duele— se cortó
+    # la única fuente para saber qué piden los asesores. Los 13 procesos del RAG
+    # salieron justamente de leer esos chats.
+    #
+    # Va al final y no puede tumbar el turno: el asesor ya tiene su respuesta y
+    # perder telemetría es mucho más barato que perder la contestación.
+    await _persistir(turno, texto, tools, perfil,
+                     res_ms=int((time.time() - arranque) * 1000))
 
     return Resultado(
         conversacion=numero,
