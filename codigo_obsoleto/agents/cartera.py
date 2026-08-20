@@ -1,4 +1,4 @@
-from shared.sap_client import sap
+from codigo_obsoleto.shared.sap_client import sap
 
 
 async def consultar_cartera(vendedor_id: str, estado: str = None, tipo: str = None) -> dict:

@@ -11,7 +11,7 @@ import json
 import os
 import time
 
-from orchestrator.context import _get_redis
+from codigo_obsoleto.orchestrator.context import _get_redis
 
 YAHUAR_NUMBER    = os.getenv("YAHUAR_NUMBER", "51977504279")
 YAHUAR_CHAT_ID   = f"{YAHUAR_NUMBER}@c.us"
@@ -29,7 +29,7 @@ IMG_DONE_KEY     = "yahuar:imgdone" # flag: acumulador ya procesado
 
 async def consultar_placa(placa: str, from_field: str) -> None:
     """Guarda en Redis quién preguntó y envía la placa a Yahuar."""
-    from shared import waha as waha_mod   # import tardío para evitar circular
+    from codigo_obsoleto.shared import waha as waha_mod   # import tardío para evitar circular
     r = await _get_redis()
     data = json.dumps(
         {"from_field": from_field, "placa": placa.upper(), "ts": time.time()},

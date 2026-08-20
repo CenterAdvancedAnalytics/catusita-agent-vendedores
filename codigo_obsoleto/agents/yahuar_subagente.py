@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 
-from shared import yahuar
+from codigo_obsoleto.shared import yahuar
 
 _TIMEOUT = int(__import__("os").getenv("YAHUAR_TIMEOUT_SECS", "80"))
 _POLL = 2.0
@@ -39,7 +39,7 @@ async def consultar_placa_bloqueante(placa: str, from_field: str,
 
     # Aviso inmediato al vendedor (best-effort; no rompe si falla)
     try:
-        from shared import waha as waha_mod
+        from codigo_obsoleto.shared import waha as waha_mod
         await waha_mod.waha.send_message(
             from_field, "", f"🔎 Consultando la placa *{placa}*, dame unos segundos…")
     except Exception as e:

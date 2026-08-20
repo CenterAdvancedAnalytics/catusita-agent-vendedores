@@ -27,8 +27,8 @@ import json
 import logging
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from orchestrator.graph_state import AgentState
-from shared import llm
+from codigo_obsoleto.orchestrator.graph_state import AgentState
+from codigo_obsoleto.shared import llm
 
 MAX_REINTENTOS = 1
 

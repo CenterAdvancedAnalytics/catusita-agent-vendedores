@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
-from orchestrator.graph import run_agent_graph
+from codigo_obsoleto.orchestrator.graph import run_agent_graph
 
 PERFIL = {
     "user_id": "asesor-003",

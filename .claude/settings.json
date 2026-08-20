@@ -10,7 +10,11 @@
       "Bash(python \"C:/Users/Gabriel1/AppData/Local/Temp/claude/c--Users-Gabriel1-Desktop-PROYECTOS-PROGRAMACION-2025-CAA-catusita-clientes-2026/9b583a37-d9a8-4c9e-8580-dd6336b87cba/scratchpad/t_yahuar_recepcion.py\")",
       "Bash(railway api *)",
       "Bash(timeout 25 railway logs -s catusita-recepcion)",
-      "Bash(timeout 40 railway logs -s catusita-recepcion)"
+      "Bash(timeout 40 railway logs -s catusita-recepcion)",
+      "Bash(python \"C:/Users/Gabriel1/AppData/Local/Temp/claude/c--Users-Gabriel1-Desktop-PROYECTOS-PROGRAMACION-2025-CAA-catusita-clientes-2026/9b583a37-d9a8-4c9e-8580-dd6336b87cba/scratchpad/alta_acceso.py\")",
+      "Bash(timeout 30 railway logs -s catusita-vendedores)",
+      "Bash(git mv *)",
+      "Bash(touch codigo_obsoleto/__init__.py)"
     ]
   }
 }

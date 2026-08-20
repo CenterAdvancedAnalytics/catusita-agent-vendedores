@@ -14,11 +14,11 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.errors import GraphRecursionError
 
-from orchestrator.graph_state import AgentState
-from orchestrator.nodes.agente import nodo_agente
-from orchestrator.nodes.pre_resolver import nodo_pre_resolver
-from orchestrator.nodes.validar import nodo_validar, MAX_REINTENTOS
-from orchestrator.lc_tools import TOOLS_VENDEDOR_LC, TOOLS_CLIENTE_LC
+from codigo_obsoleto.orchestrator.graph_state import AgentState
+from codigo_obsoleto.orchestrator.nodes.agente import nodo_agente
+from codigo_obsoleto.orchestrator.nodes.pre_resolver import nodo_pre_resolver
+from codigo_obsoleto.orchestrator.nodes.validar import nodo_validar, MAX_REINTENTOS
+from codigo_obsoleto.orchestrator.lc_tools import TOOLS_VENDEDOR_LC, TOOLS_CLIENTE_LC
 
 # Tope de "super-steps" del grafo. Cada vuelta agente→tools cuesta 2 pasos;
 # pre_resolver y validar cuestan 1 cada uno. 15 ≈ ~6 rondas de tools + reintento,

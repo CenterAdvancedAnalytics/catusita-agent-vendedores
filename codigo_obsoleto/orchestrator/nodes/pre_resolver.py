@@ -14,7 +14,7 @@ que Claude tenga que re-preguntar datos que ya mencionó el usuario.
 import re
 from langchain_core.messages import HumanMessage
 
-from orchestrator.graph_state import AgentState
+from codigo_obsoleto.orchestrator.graph_state import AgentState
 
 # ─── Patrones regex ───────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ async def _resolver_nombre_a_ruc(texto: str, perfil: dict) -> dict | None:
     if perfil.get("tipo") != "asesor":
         return None
 
-    from agents.cartera import consultar_cartera
+    from codigo_obsoleto.agents.cartera import consultar_cartera
     try:
         data = await consultar_cartera(perfil.get("vendedor_id", "V001"))
         clientes = data.get("clientes", []) if isinstance(data, dict) else []

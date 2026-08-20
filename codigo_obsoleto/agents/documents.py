@@ -1,5 +1,5 @@
-from shared.sap_client import sap
-from agents import orders
+from codigo_obsoleto.shared.sap_client import sap
+from codigo_obsoleto.agents import orders
 
 
 def _norm_num(s: str) -> str:

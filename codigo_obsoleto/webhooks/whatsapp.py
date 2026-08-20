@@ -41,12 +41,12 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request, HTTPException
 
-from shared import auth
-from shared import kapso as kapso_mod
-from shared import waha as waha_mod
-from shared import yahuar as yahuar_mod
-from orchestrator.graph import run_agent_graph_full
-from orchestrator import context
+from codigo_obsoleto.shared import auth
+from codigo_obsoleto.shared import kapso as kapso_mod
+from codigo_obsoleto.shared import waha as waha_mod
+from codigo_obsoleto.shared import yahuar as yahuar_mod
+from codigo_obsoleto.orchestrator.graph import run_agent_graph_full
+from codigo_obsoleto.orchestrator import context
 from db import models
 from vendedores import chat as vendedores_chat
 
@@ -562,7 +562,7 @@ async def _reenviar_yahuar(payload: dict, destino: str, placa: str) -> dict:
     Acumula TODOS los mensajes de Yahuar (3-4 en total) con debounce de 5s.
     Solo cuando Yahuar deja de escribir, procesa todo junto y envía al usuario.
     """
-    from shared import llm as llm_mod
+    from codigo_obsoleto.shared import llm as llm_mod
 
     texto_resp = payload.get("body") or ""
     texto_lower = texto_resp.lower()
@@ -637,7 +637,7 @@ async def _reenviar_yahuar(payload: dict, destino: str, placa: str) -> dict:
             elif media.get("url"):
                 try:
                     import httpx, base64 as b64lib
-                    from shared.waha import WAHA_BASE_URL, _headers
+                    from codigo_obsoleto.shared.waha import WAHA_BASE_URL, _headers
                     img_url = media["url"]
                     if img_url.startswith("/"):
                         img_url = f"{WAHA_BASE_URL}{img_url}"

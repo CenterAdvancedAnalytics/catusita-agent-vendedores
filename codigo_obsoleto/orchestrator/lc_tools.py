@@ -20,12 +20,12 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from agents import (
+from codigo_obsoleto.agents import (
     stock, prices, orders, documents,
     catalog_rag, cartera, imagenes,
 )
-from orchestrator import access
-from shared import llm
+from codigo_obsoleto.orchestrator import access
+from codigo_obsoleto.shared import llm
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ async def _sku_fallback(sku_code: str, resultado: dict) -> dict:
     if not (resultado.get("error") or resultado.get("detail") == "Producto no encontrado"):
         return resultado
     try:
-        from shared.sap_client import sap
+        from codigo_obsoleto.shared.sap_client import sap
         search = await sap.get_catalogo(q=sku_code)
         productos = search.get("productos", []) if isinstance(search, dict) else []
     except Exception:
@@ -282,7 +282,7 @@ async def consultar_placa_yahuar(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Consulta los datos de un vehículo peruano por su placa vía el servicio Yahuar. Úsala cuando pregunten qué auto es una placa, a quién pertenece, o quieran los datos del vehículo. La consulta BLOQUEA hasta obtener la respuesta (~30-60s): cuando devuelva, tendrás los datos del vehículo en 'datos_vehiculo_texto' — preséntaselos al usuario por escrito. La foto de la tarjeta se envía sola al chat (si 'tiene_imagen' es true, menciónaselo). Si devuelve 'error', comunícalo. NO la llames de nuevo en el mismo turno."""
-    from shared import yahuar as yahuar_mod
+    from codigo_obsoleto.shared import yahuar as yahuar_mod
     perfil     = state["perfil"]
     from_field = perfil.get("from_field") or perfil.get("numero", "")
     placa_clean = placa.strip().upper()
@@ -305,7 +305,7 @@ async def consultar_placa_yahuar(
         return _to_command(resultado, tool_call_id)
 
     # ── Modo BLOQUEANTE (subagente): espera la respuesta y la devuelve limpia ──
-    from agents import yahuar_subagente
+    from codigo_obsoleto.agents import yahuar_subagente
     resultado = await yahuar_subagente.consultar_placa_bloqueante(placa_clean, from_field)
 
     extra: dict = {}

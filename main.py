@@ -3,13 +3,13 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from webhooks.whatsapp import router_wh as whatsapp_router
+from codigo_obsoleto.webhooks.whatsapp import router_wh as whatsapp_router
 from dashboard.panel import router_panel
 
 
 async def _sync_vendedores():
     """Carga el roster de vendedores (para 'sin uso' y el filtro) desde el registro de auth."""
-    from shared import auth
+    from codigo_obsoleto.shared import auth
     from db import models
     vistos = set()
     for numero, p in auth._MOCK_ASESORES.items():

@@ -4,9 +4,9 @@ from datetime import datetime, timezone, timedelta
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from orchestrator.graph_state import AgentState
-from orchestrator.lc_tools import TOOLS_VENDEDOR_LC, TOOLS_CLIENTE_LC
-from orchestrator.prompts import SYSTEM_VENDEDOR, SYSTEM_CLIENTE
+from codigo_obsoleto.orchestrator.graph_state import AgentState
+from codigo_obsoleto.orchestrator.lc_tools import TOOLS_VENDEDOR_LC, TOOLS_CLIENTE_LC
+from codigo_obsoleto.orchestrator.prompts import SYSTEM_VENDEDOR, SYSTEM_CLIENTE
 
 _MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 

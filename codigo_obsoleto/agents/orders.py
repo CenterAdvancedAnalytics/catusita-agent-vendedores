@@ -1,4 +1,4 @@
-from shared.sap_client import sap
+from codigo_obsoleto.shared.sap_client import sap
 
 
 async def consultar_pedidos(cliente_ruc: str, estado: str = None) -> dict:

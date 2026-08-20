@@ -33,8 +33,8 @@ def _iso_utc(dt):
 from fastapi import APIRouter, Query, Header, Body, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from orchestrator import context
-from shared import auth
+from codigo_obsoleto.orchestrator import context
+from codigo_obsoleto.shared import auth
 from db import models
 
 router_panel = APIRouter()

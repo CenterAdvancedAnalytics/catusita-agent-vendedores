@@ -8,7 +8,7 @@ antes de tocar el Mock SAP.
 orchestrator/lc_tools.py: devuelve un dict de error si debe bloquearse, o None
 si la tool puede ejecutarse (habiendo normalizado, de paso, el RUC en `args`).
 """
-from agents import cartera
+from codigo_obsoleto.agents import cartera
 
 # Tools cuyo RUC debe pertenecer a la cartera del asesor antes de ejecutarse.
 # El valor es el nombre del argumento que contiene el RUC del cliente.

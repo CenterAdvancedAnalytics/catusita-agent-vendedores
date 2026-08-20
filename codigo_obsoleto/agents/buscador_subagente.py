@@ -15,8 +15,8 @@ import os
 import json
 import logging
 
-from shared import llm
-from shared.sap_client import sap
+from codigo_obsoleto.shared import llm
+from codigo_obsoleto.shared.sap_client import sap
 
 # Modelo del subagente. Por defecto el mismo que ya funciona en prod; se puede
 # bajar a Haiku por env (SUBAGENT_MODEL) para abaratar/acelerar el hot path.

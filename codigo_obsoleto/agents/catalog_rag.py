@@ -1,4 +1,4 @@
-from agents.buscador_subagente import buscar_catalogo_subagente
+from codigo_obsoleto.agents.buscador_subagente import buscar_catalogo_subagente
 
 
 async def buscar_catalogo(query: str, placa: str = None, vin: str = None) -> dict:
