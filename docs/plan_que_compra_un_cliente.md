@@ -38,12 +38,16 @@ Un proceso no puede consultar nada por sí solo. Antes va esto, en el área
 
 ### Sus variables
 
-| variable | qué es | default | por qué |
+| variable | qué es | default | quién decide |
 |---|---|---|---|
-| `cliente` | RUC o nombre | — | se resuelve con `acceso.verificar`, como el resto del área |
-| `criterio` | `monto` \| `unidades` | **a confirmar** | dan rankings DISTINTOS — ver abajo |
-| `pedidos` | cuántos pedidos hacia atrás | **a confirmar** | 20 tardó 1.2 s |
-| `top` | cuántos productos devolver | 8 | lo que entra en un WhatsApp |
+| `cliente` | RUC o nombre | — | el asesor. Se resuelve con `acceso.verificar`, como el resto del área |
+| `criterio` | `monto` \| `unidades` | `monto` | el **agente**, según cómo preguntó — ver el procedimiento |
+| `pedidos` | cuántos hacia atrás | `20` | el **agente**, si el asesor acota el período |
+| `top` | cuántos productos devolver | `8` | fijo. Es lo que entra en un WhatsApp |
+
+Ninguna queda «a confirmar»: `criterio` y `pedidos` los resuelve el agente
+leyendo la consulta, y eso está escrito en el `procedimiento`. Lo que sí queda
+pendiente son las tres decisiones del final, que son de negocio.
 
 ### Lo que devolvería
 
@@ -74,9 +78,15 @@ Un proceso no puede consultar nada por sí solo. Antes va esto, en el área
 
 **descripcion** — es lo único que se embebe, con las palabras del asesor
 
-    que le vendo mas a este cliente, que productos compra normalmente, que
-    marca prefiere, cual es su producto habitual, que suele llevar, en que
-    gasta mas este cliente, su historial de compras por producto
+Sin nombres propios: lo van a usar los 48 con acceso, cada uno preguntando por
+clientes distintos. Va la situación, no el caso.
+
+    que le vendo mas a este cliente, que productos me compra normalmente, que
+    suele llevar, cual es su producto habitual, que me compra siempre, en que
+    gasta mas, cuales son sus productos mas frecuentes, que marca prefiere,
+    que marca de aceite usa, que marca de filtros lleva, cuanto me compra de
+    una marca, su historial de compras por producto, ranking de lo que compra,
+    que le puedo ofrecer segun lo que ya compra, que compro el ultimo año
 
 **procedimiento** — borrador, pendiente de las decisiones de abajo
 
@@ -87,44 +97,65 @@ Un proceso no puede consultar nada por sí solo. Antes va esto, en el área
       - los productos que mas compra, con SKU, unidades y monto
       - el reparto por marca, en porcentaje
 
+    ── PREGUNTALE AL ASESOR, no elijas vos ────────────────────────────────
+
+    Hay dos cosas que cambian el resultado y que solo el sabe:
+
+    1. POR PLATA O POR CANTIDAD. No dan lo mismo — un foco puede ser el 6º en
+       monto y el 1º en unidades. Si no lo aclaro, mostrá el de MONTO y decile
+       en una linea que tambien lo podes ordenar por unidades.
+
+       Solo preguntaselo si la respuesta cambiaria lo que va a hacer: si dijo
+       "que le repongo", son unidades; si dijo "donde esta la plata", es monto.
+       Si ya se entiende de como pregunto, no lo hagas escribir de nuevo.
+
+    2. DESDE CUANDO. Por defecto son sus ultimos pedidos. Si el asesor dice
+       "este año", "el ultimo mes" o "siempre", pasalo como viene.
+
+    ── Lo que NO se negocia ───────────────────────────────────────────────
+
     Deci SIEMPRE sobre cuantos pedidos se calculo. "Compra mas Valvoline" no
     significa nada sin "en sus ultimos 10 pedidos".
 
     NO lo presentes como una prediccion ni como una recomendacion de compra. Es
-    lo que ya compro. Que el asesor decida que le ofrece.
+    lo que YA compro. Que el asesor decida que le ofrece.
 
     Si el cliente no tiene facturas con XML, decilo — no estimes a partir de los
     montos totales de los pedidos.
 
+    Si hubo devoluciones (notas de credito), avisalo: el calculo puede estar
+    contando mercaderia que volvio.
+
 ---
 
-## Lo que necesito que confirmes
+## Lo que resuelve el propio agente, preguntándole al asesor
 
-### 1. ¿Por monto o por unidades?
+Dos de las decisiones no son tuyas: son del asesor y cambian según para qué
+pregunta. Van en el `procedimiento` de arriba, no en una variable fija.
 
-Dan resultados distintos y no es un detalle:
+**Monto o unidades.** Dan rankings distintos:
 
 ```
 por monto      1º VALVOLINE ACEITE 5W30   $443.54   (18 unidades)
 por unidades   1º NARVA FOCOS H7          60 u      ($187.71)
 ```
 
-El foco es el 6º en plata y el 1º en cantidad. **Cuál de los dos es «lo que más
-compra»** depende de para qué lo usa el asesor: para saber qué reponerle, las
-unidades; para saber dónde está la plata, el monto.
+El foco es 6º en plata y 1º en cantidad. Para reponerle stock importan las
+unidades; para saber dónde está la plata, el monto. El agente muestra monto por
+defecto y ofrece el otro — y solo repregunta si de verdad cambia lo que el
+asesor va a hacer. Hacerlo escribir dos veces por algo que ya se entendía es
+peor que elegir bien por él.
 
-Mi sugerencia: **devolver los dos** y que el orquestador muestre el de monto
-primero. Cuesta lo mismo.
+**Desde cuándo.** Por defecto los últimos pedidos; si el asesor dice «este año»
+o «el último mes», se pasa como viene.
 
-### 2. ¿Qué ventana?
+---
 
-`pedidos=20` tardó 1.2 s. Un cliente grande puede tener cientos.
+## Lo que necesito que confirmes vos
 
-- ¿Los últimos 20 pedidos? ¿El último año? ¿Todo?
-- Un cliente que dejó de comprar hace dos años seguiría apareciendo con sus
-  compras viejas si no se corta por fecha.
+Estas tres no las puede decidir ni el agente ni el asesor.
 
-### 3. Las notas de crédito — **esto puede dar un número equivocado**
+### 1. Las notas de crédito — **esto puede dar un número equivocado**
 
 Si el cliente devolvió mercadería, hay una NC que anula esa venta. Hoy el cálculo
 **la ignora**: cuenta la factura completa como si se hubiera vendido.
@@ -135,7 +166,7 @@ Se puede restar —las NC vienen en `creditNotes` de cada documento— pero hay 
 decidir si una NC parcial descuenta líneas o solo monto. **Necesito saber cómo
 las emiten en Catusita.**
 
-### 4. La marca: de dónde se saca
+### 2. La marca: de dónde se saca
 
 Hoy tomo la primera palabra de la descripción, y sale mal:
 
@@ -153,8 +184,44 @@ Lo correcto es cruzar el SKU contra `/api/article/filter?ItemCode=`, que trae
 ¿Se hace en vivo, o se arma una tabla local de SKU→marca que se refresque de
 noche?
 
-### 5. ¿Quién puede ver esto?
+### 3. ¿Quién puede ver esto?
 
 Son las compras de un cliente. Hoy `acceso.verificar` ya garantiza que el asesor
 solo consulte los suyos. ¿Alcanza, o hay algo más que no debería salir por
 WhatsApp?
+
+---
+
+## Antes de cargarlo: medir, no suponer
+
+Es el paso que ya nos ahorró un proceso mal cargado. Con la `descripcion` de
+arriba, cada una de estas tiene que recuperar el proceso por encima de 0.50:
+
+```
+que le vendo mas a este cliente
+que productos me compra normalmente
+que suele llevar este cliente
+que marca prefiere
+que marca de aceite usa
+cuanto me compra de Valvoline
+que le puedo ofrecer a este cliente
+```
+
+Y estas NO tienen que recuperarlo — son consultas de otra cosa que comparten
+palabras:
+
+```
+que pedidos tiene este cliente          -> area pedidos, normal
+cuanto me debe este cliente             -> cobranzas
+que productos hay en stock              -> area productos
+quienes son mis clientes                -> area clientes
+```
+
+El riesgo concreto acá es el último grupo: «que productos…» aparece en los dos
+lados. Si un «¿qué productos hay del filtro 33120?» recupera este proceso, el
+agente va a buscar el historial de compras de un cliente que nadie nombró.
+
+Si alguna falla, se corrige la `descripcion` — nunca se baja el umbral.
+
+Y el corte fino no lo hace el coseno: el área `conocimiento` recibe el campo
+`cubre` y descarta lo que no aplica. Eso ya está andando.
