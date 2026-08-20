@@ -47,6 +47,7 @@ import base64
 import mimetypes
 import os
 
+from vendedores.agentes.productos import busqueda
 from vendedores.plataforma_vendedores import catusita_api
 
 TIMEOUT_IMAGEN = 30.0
@@ -136,23 +137,63 @@ async def precios(sku: str, tipo: str, cliente_codigo: str | None = None) -> dic
 
 async def catalogo(q: str | None = None, categoria: str | None = None,
                    marca: str | None = None, con_stock: bool | None = None) -> dict:
-    """Búsqueda de artículos. `categoria` y `con_stock` no existen en la API.
+    """Búsqueda de artículos, tolerante a cómo escribe el asesor.
 
-    `categoria` se aplica acá, filtrando por `subSpecialtyName`/`specialtyName`,
-    porque la API no tiene ese parámetro pero sí devuelve el campo. `con_stock`
-    en cambio exigiría una consulta de stock por artículo, así que no se aplica
-    y se avisa — filtrar de mentira es peor que no filtrar.
+    ── Por qué no se le pasa `q` a la API tal cual ────────────────────────────
+
+    Porque `SearchText` es substring literal y devuelve cero con casi cualquier
+    frase real. Medido: 'amortiguadores para Toyota' -> 0, 'wk723' -> 0,
+    'amortiguador trasero' -> 0. Con un solo token -> 650.
+
+    Así que se le pide UN token —el más fuerte— y el filtro fino corre acá
+    contra ese conjunto. Toda esa lógica está en `busqueda.py`; acá solo se
+    orquesta.
+
+    `categoria` se aplica local (la API no tiene el parámetro pero sí el campo).
+    `con_stock` no se aplica: exigiría una consulta de stock por artículo. Se
+    avisa en vez de filtrar de mentira.
     """
+    analisis = busqueda.analizar(q or "")
+    tokens, codigos = analisis["tokens"], analisis["codigos"]
+
+    # Con qué se le pregunta a la API. Un código es lo más específico que hay;
+    # si no hay, el token más largo.
+    consulta_api = (codigos[0] if codigos
+                    else busqueda.token_mas_fuerte(tokens)) or (q or "")
+
     datos = _lista(await catusita_api.get(
-        "/api/article/filter", {"SearchText": q, "BrandName": marca}))
+        "/api/article/filter", {"SearchText": consulta_api, "BrandName": marca}))
     if isinstance(datos, dict):
         return datos
 
-    productos = [_articulo(f) for f in datos]
+    # ── El asesor escribió el código sin guiones ─────────────────────────────
+    #
+    # 'wk723' contra un catálogo que tiene 'WK-723' da cero, y aplanar la
+    # consulta no arregla nada porque ya venía plana. Se reintenta pidiendo un
+    # TRAMO del código —'723'— que sí sobrevive al guión; el filtro local
+    # después compara las formas aplanadas y ahí sí coinciden.
+    if not datos and codigos:
+        for tramo in busqueda.tramos_de_codigo(codigos[0]):
+            if len(tramo) < busqueda.MIN_TOKEN:
+                continue
+            datos = _lista(await catusita_api.get(
+                "/api/article/filter", {"SearchText": tramo, "BrandName": marca}))
+            if isinstance(datos, dict):
+                return datos
+            if datos:
+                break
+
+    # Los tokens que ya se usaron para pedirle a la API no se vuelven a exigir
+    # acá: la API ya los aplicó.
+    restantes = [t for t in tokens if t != consulta_api]
+    encontrados, soltados = busqueda.filtrar(datos, restantes, codigos)
+
+    productos = [_articulo(f) for f in encontrados]
 
     if categoria:
-        buscada = categoria.lower()
-        productos = [p for p in productos if buscada in (p["categoria"] or "").lower()]
+        buscada = busqueda.normalizar(categoria)
+        productos = [p for p in productos
+                     if buscada in busqueda.normalizar(p["categoria"] or "")]
 
     resultado: dict = {
         "total": len(productos),
@@ -162,6 +203,25 @@ async def catalogo(q: str | None = None, categoria: str | None = None,
         resultado["mensaje"] = (
             f"Hay {len(productos)} coincidencias; se muestran las primeras "
             f"{MAX_CATALOGO}. Si ninguna sirve, pedile al usuario que precise.")
+
+    # ── Lo que el área TIENE que contarle al asesor ──────────────────────────
+    #
+    # Sin esto la búsqueda miente por omisión: devuelve resultados que no
+    # cumplen todo lo que pidió, y el asesor cotiza una pieza de otro año.
+    if analisis["ignorados"]:
+        resultado["no_se_filtro_por"] = {
+            "valores": analisis["ignorados"],
+            "mensaje": ("El año y el código de motor no están en el texto del "
+                        "catálogo, así que NO se filtró por ellos. Avisale al "
+                        "usuario y pedile que confirme la versión."),
+        }
+    if soltados:
+        resultado["se_relajo"] = {
+            "terminos": soltados,
+            "mensaje": ("Con todos los términos no había ninguno, así que se "
+                        f"buscó sin {soltados}. Decilo al mostrar los "
+                        "resultados."),
+        }
     if con_stock is not None:
         resultado["filtros_ignorados"] = {
             "campos": ["con_stock"],

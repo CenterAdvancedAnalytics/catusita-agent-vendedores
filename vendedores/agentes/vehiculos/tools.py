@@ -69,7 +69,30 @@ async def consultar_placa(
     TODO: encolar en `yahuar:solicitudes` y esperar en `yahuar:resultado:{placa}`.
     Depende de que exista el servicio de Yahuar.
     """
-    raise NotImplementedError
+    # ── Por qué devuelve un error y no `raise NotImplementedError` ────────────
+    #
+    # Porque la excepción reventaba el turno entero. Medido: «¿Qué auto es la
+    # placa F9N562?» terminaba en NotImplementedError, el worker lo convertía en
+    # un Resultado con ok=False, y el asesor recibía «no pude procesar tu
+    # mensaje» — sin ninguna pista de por qué.
+    #
+    # Y no era un caso raro: la consulta de placa está prometida en
+    # docs/guia_uso_vendedor.md y hoy funciona en el stack viejo. Apenas se
+    # corte el webhook hacia recepción, el 100% de las placas fallaría así.
+    #
+    # Un área que todavía no puede hacer su trabajo tiene que DECIRLO. El
+    # orquestador con esto arma una respuesta honesta; con una excepción no
+    # tiene nada.
+    return _responder({
+        "error": "NO_DISPONIBLE",
+        "mensaje": (
+            "La consulta de placas todavía no está conectada en esta versión: "
+            "depende del servicio de Yahuar, que aún no está desplegado. "
+            "Decíselo al asesor tal cual y no intentes deducir el vehículo por "
+            "otro lado. Si te da la marca y el modelo a mano, con eso sí podés "
+            "buscarle repuestos en el área productos."
+        ),
+    }, tool_call_id)
 
 
 TOOLS = [consultar_placa]

@@ -37,6 +37,7 @@ import base64
 import mimetypes
 import os
 
+from clientes.agentes.productos import busqueda
 from clientes.plataforma_clientes import catusita_api
 
 TIMEOUT_IMAGEN = 30.0
@@ -116,10 +117,37 @@ async def precios(sku: str) -> dict:
 
 async def catalogo(q: str | None = None, categoria: str | None = None,
                    marca: str | None = None) -> dict:
+    """Búsqueda tolerante a cómo escribe la gente. Ver `busqueda.py`.
+
+    `SearchText` de la API es substring literal: 'filtro de aceite para Toyota'
+    devuelve cero. Se le pide UN token y el filtro fino corre acá.
+
+    El cliente escribe todavía peor que el asesor —no sabe los códigos ni cómo
+    los abrevia el catálogo—, así que acá importa más que en vendedores.
+    """
+    analisis = busqueda.analizar(q or "")
+    tokens, codigos = analisis["tokens"], analisis["codigos"]
+    consulta_api = (codigos[0] if codigos
+                    else busqueda.token_mas_fuerte(tokens)) or (q or "")
+
     datos = _lista(await catusita_api.get(
-        "/api/article/filter", {"SearchText": q, "BrandName": marca}))
+        "/api/article/filter", {"SearchText": consulta_api, "BrandName": marca}))
     if isinstance(datos, dict):
         return datos
+
+    if not datos and codigos:
+        for tramo in busqueda.tramos_de_codigo(codigos[0]):
+            if len(tramo) < busqueda.MIN_TOKEN:
+                continue
+            datos = _lista(await catusita_api.get(
+                "/api/article/filter", {"SearchText": tramo, "BrandName": marca}))
+            if isinstance(datos, dict):
+                return datos
+            if datos:
+                break
+
+    restantes = [t for t in tokens if t != consulta_api]
+    encontrados, soltados = busqueda.filtrar(datos, restantes, codigos)
 
     productos = [
         _recortar({
@@ -128,15 +156,29 @@ async def catalogo(q: str | None = None, categoria: str | None = None,
             "categoria": f.get("subSpecialtyName") or f.get("specialtyName") or "",
             "marca": f.get("brandName") or f.get("nameSupply") or "",
         }, _PRODUCTO)
-        for f in datos
+        for f in encontrados
     ]
 
     if categoria:
-        buscada = categoria.lower()
+        buscada = busqueda.normalizar(categoria)
         productos = [p for p in productos
-                     if buscada in (p.get("categoria") or "").lower()]
+                     if buscada in busqueda.normalizar(p.get("categoria") or "")]
 
-    return {"productos": productos[:MAX_CATALOGO]}
+    resultado: dict = {"productos": productos[:MAX_CATALOGO]}
+    if analisis["ignorados"]:
+        resultado["no_se_filtro_por"] = {
+            "valores": analisis["ignorados"],
+            "mensaje": ("El año y el código de motor no están en el texto del "
+                        "catálogo, así que NO se filtró por ellos. Avisale y "
+                        "pedile que confirme el modelo."),
+        }
+    if soltados:
+        resultado["se_relajo"] = {
+            "terminos": soltados,
+            "mensaje": ("Con todos los términos no había ninguno, así que se "
+                        f"buscó sin {soltados}. Decilo al mostrar los resultados."),
+        }
+    return resultado
 
 
 async def imagen(sku: str) -> dict:

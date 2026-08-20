@@ -14,10 +14,13 @@ from vendedores.agentes.vehiculos.tools import TOOLS
 # la lista de sus tools: el orquestador delega en el área y es ella la que
 # decide cuáles usar y en qué orden.
 DESCRIPCION = (
-    "Qué vehículo es una placa peruana: marca, modelo, año, VIN y motor. "
-    "TARDA 30-60 SEGUNDOS.\n"
-    "Solo IDENTIFICA el vehículo. NO devuelve qué repuestos le sirven: con la "
-    "marca y el modelo en la mano, eso se busca después en `productos`."
+    "Qué vehículo es una placa peruana: marca, modelo, año, VIN y motor.\n"
+    "HOY NO ESTÁ DISPONIBLE: depende del servicio de Yahuar, que todavía no "
+    "está desplegado. Si te preguntan por una placa, delegá igual — el área "
+    "devuelve el motivo para que se lo expliques, no lo inventes vos.\n"
+    "Cuando funcione TARDA 30-60 SEGUNDOS. Solo IDENTIFICA el vehículo: no "
+    "devuelve qué repuestos le sirven — con la marca y el modelo en la mano, "
+    "eso se busca después en `productos`."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]
