@@ -37,11 +37,16 @@ api.catusita.com. Queda anotado porque es la clase de cosa que nadie revisa
 después; si algún día hay https, solo cambia CATUSITA_API_URL.
 """
 import asyncio
+import logging
 import os
+import time
 import urllib.request
+from contextlib import asynccontextmanager
 
 import httpx
 from dotenv import load_dotenv
+
+from clientes.plataforma_clientes import redis as redis_mod
 
 load_dotenv()
 
@@ -67,10 +72,35 @@ TIMEOUT = 20.0
 # dos `consultar_pedidos` y uno volvía con error 500 — sin que nada en el código
 # del área insinuara que eso podía pasar.
 #
-# El lock es por proceso, así que no cubre a los tres workers pegándole juntos.
-# Ese caso queda para el reintento de abajo; lo que se elimina acá es el choque
-# de un turno consigo mismo, que es el que pasa siempre.
+# ── Por qué el lock es de Redis y no un asyncio.Lock ─────────────────────────
+#
+# Un `asyncio.Lock()` vive dentro de UN proceso. Alcanzaba mientras había un
+# contenedor por multiagente: lo que había que evitar era que un turno se
+# pisara a sí mismo (LangGraph corre las tool calls en paralelo).
+#
+# Con réplicas deja de alcanzar. Tres contenedores de `vendedores` son tres
+# locks independientes que no se ven entre sí, y los tres le pegan a
+# `sales/orders` al mismo tiempo — o sea, exactamente el 83% de error 500 que el
+# lock existía para evitar.
+#
+# Con una clave en Redis el candado es uno solo para todos los procesos, esté
+# donde esté cada uno.
 SERIALIZADOS = ("/api/sales/orders",)
+
+# El candado. Uno por prefijo serializado, no uno global: `sales/orders` no
+# tiene por qué esperar a nada más.
+CLAVE_LOCK = "api:lock:sales-orders"
+
+# Cuánto vive el candado si quien lo tomó se muere. Un turno normal contra este
+# endpoint tarda menos de un segundo; 15 da margen de sobra y garantiza que un
+# contenedor que se cae no deja la cola trabada más que eso.
+LOCK_TTL = 15
+
+# Cuánto se espera a que se libere antes de seguir igual. Sin tope, una réplica
+# colgada bloquearía a todas las demás; pasado esto se arriesga el 500, que el
+# reintento suele salvar.
+LOCK_ESPERA_MAX = 10.0
+LOCK_SONDEO = 0.05
 
 # Pausa antes del único reintento ante un 500. Corta a propósito: el turno de
 # WhatsApp está esperando del otro lado.
@@ -102,9 +132,57 @@ async def get(path: str, params: dict | None = None,
     limpios = {k: v for k, v in (params or {}).items() if v not in (None, "")}
 
     if _hay_que_serializar(path):
+        # El lock local sigue: evita que las tareas de ESTE proceso peleen por
+        # el de Redis, que sería una ronda de red por cada una.
         async with _lock_series:
-            return await _pedir(path, limpios, timeout)
+            async with _candado():
+                return await _pedir(path, limpios, timeout)
     return await _pedir(path, limpios, timeout)
+
+
+@asynccontextmanager
+async def _candado():
+    """Mutex entre procesos sobre `sales/orders`. Nunca bloquea para siempre.
+
+    Es un `SET NX EX`: el primero que lo pone gana, y el TTL garantiza que un
+    contenedor que se muere con el candado tomado no traba al resto más allá de
+    `LOCK_TTL`.
+
+    ── Por qué se sigue igual si no se pudo tomar ─────────────────────────────
+
+    Porque el candado es una OPTIMIZACIÓN, no una regla de negocio: existe para
+    no provocar un 500 evitable. Si después de `LOCK_ESPERA_MAX` no se soltó,
+    algo raro pasa —una réplica colgada, Redis lento— y esperar más solo agrega
+    latencia a un turno que ya tiene a alguien esperando del otro lado.
+
+    Se sigue, y si sale 500 el reintento de `_pedir` lo suele salvar. Peor sería
+    devolverle «no pude» al asesor por un candado.
+    """
+    tomado = False
+    r = None
+    try:
+        r = await redis_mod.get()
+        limite = time.monotonic() + LOCK_ESPERA_MAX
+        while time.monotonic() < limite:
+            if await r.set(CLAVE_LOCK, "1", nx=True, ex=LOCK_TTL):
+                tomado = True
+                break
+            await asyncio.sleep(LOCK_SONDEO)
+        else:
+            logging.warning("[catusita_api] candado de sales/orders no se soltó; sigo igual")
+    except Exception as e:
+        # Sin Redis no hay candado, pero sí hay consulta que hacer. El lock
+        # local del proceso sigue en pie, que es mejor que nada.
+        logging.error(f"[catusita_api] no se pudo tomar el candado: {e}")
+
+    try:
+        yield
+    finally:
+        if tomado and r is not None:
+            try:
+                await r.delete(CLAVE_LOCK)
+            except Exception:
+                pass   # el TTL lo limpia igual
 
 
 async def _pedir(path: str, params: dict, timeout: float | None) -> dict | list:
