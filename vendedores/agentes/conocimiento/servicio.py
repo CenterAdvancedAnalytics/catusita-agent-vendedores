@@ -45,6 +45,24 @@ K = 5
 # una copia: si los dos caminos se separan, el mismo mensaje encuentra proceso
 # por uno y no por el otro.
 #
+# ── El umbral es un filtro GRUESO, no la decisión ─────────────────────────────
+#
+# Lo que pasa el corte son CANDIDATOS. Quien decide si aplican es el agente del
+# área, leyendo el campo `cubre` (la `descripcion` del proceso) y comparándolo
+# con lo que se consultó.
+#
+# No es una capa de más: es la única que puede. Medido con los procesos reales:
+#
+#     0.643   'Deseo saber mi cartera de clientes'   -> «cartera de OTRO asesor»
+#     0.571   'la cartera de la vendedora <nombre>'  -> «cartera de OTRO asesor»
+#
+# El primero es un FALSO POSITIVO y el segundo el caso legítimo — y el falso
+# puntúa MÁS ALTO. Ningún umbral los separa: subirlo mata el bueno antes que el
+# malo. El embedding no distingue el posesivo, y ese posesivo es toda la
+# diferencia entre atender una consulta y negarla.
+#
+# Por eso el proceso recuperado NO se devuelve tal cual. Ver `prompt.py`.
+#
 # ── Por qué 0.50 y no menos ───────────────────────────────────────────────────
 #
 # Devolver un proceso que NO aplica es peor que no devolver ninguno. El

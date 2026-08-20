@@ -23,7 +23,11 @@ async def buscar_conocimiento(
 ) -> Command:
     """Busca en los procesos de Catusita cómo se resuelve algo. Úsala cuando lo
     que te sirvió el contexto no alcance, o cuando la consulta no corresponda a
-    ninguna otra área. Pasa la consulta del usuario TAL CUAL, sin reformularla."""
+    ninguna otra área. Pasa la consulta del usuario TAL CUAL, sin reformularla.
+
+    Lo que vuelve son CANDIDATOS, no respuestas. Cada uno trae `cubre`, que dice
+    en qué situación aplica: comparalo con lo que se preguntó y descartá los que
+    no correspondan."""
     procesos = await servicio.buscar(consulta)
 
     if not procesos:
@@ -34,7 +38,7 @@ async def buscar_conocimiento(
         # Que no exista un procedimiento escrito no es que no se pueda resolver
         # — es que no hay una forma oficial y hay que usar criterio.
         return _responder({
-            "encontrado": False,
+            "candidatos": [],
             "mensaje": (
                 "No hay ningún proceso escrito para esto. No es un impedimento: "
                 "resolvelo con tus áreas y tu criterio. Lo único que no cambia "
@@ -42,13 +46,33 @@ async def buscar_conocimiento(
             ),
         }, tool_call_id)
 
+    # ── Por qué viaja `cubre` (la `descripcion` del proceso) ──────────────────
+    #
+    # Es el campo que dice PARA QUÉ SITUACIÓN existe el proceso, y es lo único
+    # con lo que se puede decidir si aplica. Sin él, el modelo recibe un
+    # procedimiento suelto y no tiene contra qué contrastarlo: lo pasa siempre.
+    #
+    # Y pasarlo siempre es exactamente el problema. La búsqueda es por coseno y
+    # devuelve lo más parecido, no lo correcto — medido: «Deseo saber mi cartera
+    # de clientes» recupera el proceso de «cartera de OTRO asesor» con 0.543, y
+    # ese proceso dice que no se entrega. Sin nadie que lo mire, el asesor
+    # termina recibiendo una negativa sobre su propia cartera.
+    #
+    # El umbral es un filtro grueso. El fino es leer `cubre` y descartar.
     return _responder({
-        "encontrado": True,
-        "procesos": [
-            {"proceso": p["proceso"], "procedimiento": p["procedimiento"],
+        "candidatos": [
+            {"proceso": p["proceso"],
+             "cubre": p["descripcion"],
+             "procedimiento": p["procedimiento"],
              "similitud": round(p["similitud"], 3)}
             for p in procesos
         ],
+        "mensaje": (
+            "Son candidatos por parecido de texto, no respuestas verificadas. "
+            "Para cada uno, mirá `cubre` y preguntate si describe la MISMA "
+            "situación que se consultó. Si ninguno aplica, decilo — es una "
+            "respuesta válida y mejor que seguir un procedimiento equivocado."
+        ),
     }, tool_call_id)
 
 

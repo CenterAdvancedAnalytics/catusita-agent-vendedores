@@ -51,9 +51,14 @@ async def consultar_precio(
     sku_code: str,
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Precio NETO de un producto por SKU: el que el asesor cotiza, ya con su
-    descuento. Es información interna — quien la recibe decide qué comparte."""
-    resultado = await backend.precios(sku_code, tipo="neto")
+    """Precio de LISTA de un producto por SKU.
+
+    Es el precio publicado, sin descuento aplicado. NO lo llames «precio neto»:
+    el neto sale de negociar con el cliente y de este agente no sale.
+
+    La respuesta trae `lista_precio` con el nombre de la lista que se usó
+    (LISTA_DEFECTO). Decilo si te preguntan de qué precio se trata."""
+    resultado = await backend.precios(sku_code, tipo="lista")
     return _responder(await servicio.con_sugerencias(sku_code, resultado), tool_call_id)
 
 
