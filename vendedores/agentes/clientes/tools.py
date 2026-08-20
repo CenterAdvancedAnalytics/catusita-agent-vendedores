@@ -30,24 +30,33 @@ def _responder(resultado: dict, tool_call_id: str) -> Command:
 async def consultar_cartera(
     state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    estado: Optional[str] = None,
-    tipo: Optional[str] = None,
+    distrito: Optional[str] = None,
+    buscar: Optional[str] = None,
+    limite: Optional[int] = None,
 ) -> Command:
-    """Todos los clientes asignados a este asesor, con razón social, tipo,
-    estado, límite de crédito, saldo pendiente y último pedido.
+    """Los clientes asignados a este asesor: cuántos son, en qué distritos y
+    una muestra con razón social, RUC, código, dirección y email.
 
-    Usar SIEMPRE que pregunten por «mis clientes», «mi cartera», «qué clientes
-    tengo». Nunca contestar eso de memoria.
+    Usar SIEMPRE que pregunten por «mis clientes», «mi cartera», «cuántos
+    clientes tengo». Nunca contestar eso de memoria.
 
-    `estado`: activo | suspendido | bloqueado
-    `tipo`:   taller | distribuidor | consumidor_final"""
+    NO devuelve la cartera entera de una: devuelve el total, el reparto por
+    distrito y los primeros. Para el resto están los filtros — la lista completa
+    no le sirve a nadie en un chat de WhatsApp.
+
+    `distrito`: filtra por zona («Surco», «Ate», «Cusco»)
+    `buscar`:   filtra por nombre o RUC
+    `limite`:   cuántos listar (default 25, tope 60)"""
     vendedor_id = (state.get("perfil") or {}).get("vendedor_id")
     if not vendedor_id:
         return _responder({
             "error": "SIN_VENDEDOR",
             "mensaje": "No se pudo identificar al asesor.",
         }, tool_call_id)
-    return _responder(await backend.cartera(vendedor_id, estado, tipo), tool_call_id)
+    return _responder(
+        await backend.cartera(vendedor_id, distrito=distrito, buscar=buscar,
+                              limite=limite or backend.MAX_CLIENTES),
+        tool_call_id)
 
 
 @tool

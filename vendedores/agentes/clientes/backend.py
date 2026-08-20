@@ -38,8 +38,41 @@ def _adaptar(fila: dict) -> dict:
     }
 
 
-async def cartera(vendedor_id: str, estado: str | None = None,
-                  tipo: str | None = None) -> dict:
+# Cuántos clientes se le muestran al modelo cuando no filtró nada.
+#
+# ── Por qué hay un tope y por qué es este ────────────────────────────────────
+#
+# Devolver la cartera entera costaba 95 SEGUNDOS. Medido, con 187 clientes:
+#
+#     backend.cartera()        57.691 chars (~14.400 tokens) ->  0.1s de API
+#     el modelo del área       leyó eso y escribió una tabla  -> 95s
+#     lo que llegó al asesor   162 chars
+#
+# O sea: minuto y medio generando una tabla markdown de 187 filas que NADIE VE,
+# porque a WhatsApp solo va la respuesta final del orquestador.
+#
+# 25 es lo que entra en un mensaje de WhatsApp sin que el asesor deje de leer.
+# Para el resto están los filtros: son datos que la API ya trajo, no hay una
+# segunda llamada.
+MAX_CLIENTES = 25
+
+# Cuántos distritos se resumen. Con más, el resumen vuelve a ser una lista.
+MAX_DISTRITOS = 12
+
+
+def _distrito_corto(valor: str) -> str:
+    """'SANTIAGO DE SURCO/LIMA/LIMA' -> 'SANTIAGO DE SURCO'."""
+    return (valor or "").split("/")[0].strip()
+
+
+async def cartera(vendedor_id: str, distrito: str | None = None,
+                  buscar: str | None = None, limite: int = MAX_CLIENTES,
+                  estado: str | None = None, tipo: str | None = None) -> dict:
+    """Cartera del asesor: un resumen y una muestra, no un volcado.
+
+    La API devuelve los 187 de una sola vez y en 0.1s, así que los filtros se
+    aplican acá sobre lo ya traído — no cuestan otra llamada.
+    """
     if not vendedor_id:
         return {"error": "SIN_VENDEDOR", "clientes": []}
 
@@ -48,22 +81,69 @@ async def cartera(vendedor_id: str, estado: str | None = None,
     if isinstance(datos, dict) and datos.get("error"):
         return datos
 
-    filas = datos if isinstance(datos, list) else []
+    filas = [_adaptar(f) for f in (datos if isinstance(datos, list) else [])]
+    total = len(filas)
+
+    # Cada fila repite `vendedor` y `codigo_vendedor` con el MISMO valor: es la
+    # cartera de un solo asesor. Van una vez arriba y se sacan de las filas.
+    vendedor_nombre = filas[0]["vendedor"] if filas else ""
+    for f in filas:
+        f.pop("vendedor", None)
+        f.pop("codigo_vendedor", None)
+
+    coincidentes = filas
+    if distrito:
+        d = distrito.lower()
+        coincidentes = [c for c in coincidentes if d in (c["distrito"] or "").lower()]
+    if buscar:
+        b = buscar.lower()
+        coincidentes = [c for c in coincidentes
+                        if b in (c["razon_social"] or "").lower() or b in (c["ruc"] or "")]
+
+    # Dónde están sus clientes. Es la pregunta que sigue casi siempre («¿a
+    # quiénes le vendo en Surco?») y resumirla cuesta nada.
+    conteo: dict[str, int] = {}
+    for c in coincidentes:
+        d = _distrito_corto(c["distrito"])
+        if d:
+            conteo[d] = conteo.get(d, 0) + 1
+    por_distrito = dict(sorted(conteo.items(), key=lambda x: -x[1])[:MAX_DISTRITOS])
+
+    tope = max(1, min(int(limite or MAX_CLIENTES), 60))
+    muestra = coincidentes[:tope]
+
     resultado = {
         "vendedor_id": vendedor_id,
-        "vendedor_nombre": (filas[0].get("nameSeller") if filas else "") or "",
-        "total_clientes": len(filas),
-        "clientes": [_adaptar(f) for f in filas],
+        "vendedor_nombre": vendedor_nombre,
+        "total_clientes": total,
+        "coinciden": len(coincidentes),
+        "por_distrito": por_distrito,
+        "mostrados": len(muestra),
+        "clientes": muestra,
     }
 
+    if len(coincidentes) > len(muestra):
+        resultado["mensaje"] = (
+            f"Tiene {len(coincidentes)} clientes y acá van {len(muestra)}. "
+            "MOSTRALOS: razón social + RUC de cada uno, que es lo que necesita "
+            "para pedirte después sus pedidos o su factura. Sin el RUC te lo "
+            "va a tener que volver a preguntar.\n"
+            "Después decí el total y ofrecele filtrar por distrito o buscar por "
+            "nombre. Lo que NO podés es inventar ni completar los que faltan: "
+            "no los tenés.")
+
+    if distrito and not coincidentes:
+        resultado["mensaje"] = (
+            f"Ningún cliente de su cartera está en '{distrito}'. Los distritos "
+            "donde sí tiene están en `por_distrito` de una consulta sin filtro.")
+
     # Se avisa; no se filtra. Ver la nota del encabezado.
-    pedidos_no_soportados = [n for n, v in (("estado", estado), ("tipo", tipo)) if v]
-    if pedidos_no_soportados:
+    no_soportados = [n for n, v in (("estado", estado), ("tipo", tipo)) if v]
+    if no_soportados:
         resultado["filtros_ignorados"] = {
-            "campos": pedidos_no_soportados,
+            "campos": no_soportados,
             "mensaje": ("La cartera no trae estado ni tipo de cliente, así que "
-                        "no se pudo filtrar. Esta es la cartera completa: "
-                        "aclarale al usuario que el filtro no se aplicó."),
+                        "no se pudo filtrar por eso. Aclaráselo al usuario."),
         }
     return resultado
 
