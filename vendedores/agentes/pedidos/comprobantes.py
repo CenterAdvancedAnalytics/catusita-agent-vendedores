@@ -25,8 +25,10 @@ deja de matchear, el resultado es cero líneas — no un dato equivocado.
 """
 import re
 
-# Una línea de la factura. El nombre viene del estándar UBL de SUNAT.
-_LINEA = re.compile(r"<cac:InvoiceLine>.*?</cac:InvoiceLine>", re.S)
+# Una línea del comprobante. En una factura es `InvoiceLine`; en una nota de
+# crédito, `CreditNoteLine`. Misma forma adentro.
+_LINEA = re.compile(
+    r"<cac:(?:Invoice|CreditNote)Line>.*?</cac:(?:Invoice|CreditNote)Line>", re.S)
 _ITEM = re.compile(r"<cac:Item>.*?</cac:Item>", re.S)
 
 # El CDATA es opcional: algunos emisores lo usan y otros no.
@@ -34,7 +36,35 @@ _DESC = re.compile(
     r"<cbc:Description>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</cbc:Description>", re.S)
 _SKU = re.compile(
     r"<cac:SellersItemIdentification>\s*<cbc:ID>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</cbc:ID>", re.S)
-_CANT = re.compile(r"<cbc:InvoicedQuantity[^>]*>(.*?)</cbc:InvoicedQuantity>")
+_CANT = re.compile(
+    r"<cbc:(?:Invoiced|Credited)Quantity[^>]*>(.*?)</cbc:(?:Invoiced|Credited)Quantity>")
+
+# ── Qué tipo de nota de crédito es (catálogo 09 de SUNAT) ─────────────────────
+#
+# Importa porque no todas descuentan lo mismo. Un descuento global baja la plata
+# pero el cliente se quedó con la mercadería; una devolución baja las dos cosas.
+#
+# Restar unidades en un descuento haría que un cliente que negoció una rebaja
+# figure como si hubiera devuelto producto.
+_MOTIVO = re.compile(r"<cbc:ResponseCode[^>]*>(.*?)</cbc:ResponseCode>")
+
+DEVUELVE_MERCADERIA = {
+    "01",  # anulación de la operación
+    "06",  # devolución total
+    "07",  # devolución por ítem
+}
+SOLO_PLATA = {
+    "04",  # descuento global
+    "05",  # descuento por ítem
+    "08",  # bonificación
+    "09",  # disminución en el valor
+}
+
+
+def motivo(xml: str) -> str:
+    """El código del catálogo 09. Cadena vacía si no está."""
+    m = _MOTIVO.search(xml or "")
+    return m.group(1).strip() if m else ""
 
 # La moneda va en un atributo, no en el texto. Sacarla es un error caro: el
 # modelo la asume y escribió "S/ 443" sobre un monto que estaba en dólares.

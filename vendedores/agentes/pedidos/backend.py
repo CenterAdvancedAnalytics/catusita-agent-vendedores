@@ -151,14 +151,19 @@ async def compras(cliente_ruc: str, cantidad: int = 20) -> dict:
     if pedidos_.get("error"):
         return pedidos_
 
-    # Los documentos de todos sus pedidos, y qué notas de crédito hay.
-    docs, notas = [], 0
+    # Facturas y notas de crédito, por separado: las primeras suman y las
+    # segundas restan.
+    docs, notas_cred = [], []
     for p in pedidos_.get("pedidos") or []:
         for d in p.get("documentos") or []:
             if d.get("numero"):
                 docs.append((d["numero"], d.get("tipo_codigo") or "01",
                              d.get("empresa_codigo") or "", p.get("fecha", "")))
-            notas += len(d.get("notas_credito") or [])
+            for nc in d.get("notas_credito") or []:
+                if nc.get("numero"):
+                    notas_cred.append((nc["numero"], nc.get("tipo_codigo") or "07",
+                                       nc.get("empresa_codigo") or d.get("empresa_codigo") or "",
+                                       nc.get("fecha", "")))
 
     if not docs:
         return {"cliente": pedidos_.get("cliente", ""), "ruc": cliente_ruc,
@@ -196,6 +201,50 @@ async def compras(cliente_ruc: str, cantidad: int = 20) -> dict:
                 "error": "SIN_DETALLE",
                 "mensaje": "No se pudo leer el detalle de sus facturas."}
 
+    # ── Restar lo devuelto ────────────────────────────────────────────────────
+    #
+    # Sin esto los números mienten y no poco: un cliente de prueba tenía 20
+    # unidades de refrigerante en el ranking y había devuelto 14. Lo real eran
+    # 6, y el producto se cae del top.
+    #
+    # No todas las NC restan lo mismo. El catálogo 09 de SUNAT distingue una
+    # DEVOLUCIÓN —el cliente entregó la mercadería— de un DESCUENTO, donde se
+    # quedó con ella y solo se le bajó el precio. Restar unidades en un
+    # descuento haría figurar como devolución una rebaja negociada.
+    devueltas = {"unidades": 0.0, "monto": 0.0, "documentos": 0}
+    if notas_cred:
+        urls_nc = await asyncio.gather(
+            *(_url_xml(n, t, e) for n, t, e, _ in notas_cred))
+        xmls_nc = await asyncio.gather(
+            *(catusita_api.descargar(u, timeout=TIMEOUT_XML) for u in urls_nc if u))
+
+        for crudo in xmls_nc:
+            if not crudo:
+                continue
+            texto = crudo.decode("utf-8", errors="replace")
+            codigo = comprobantes.motivo(texto)
+            if codigo in comprobantes.SOLO_PLATA:
+                resta_unidades = False
+            elif codigo in comprobantes.DEVUELVE_MERCADERIA or not codigo:
+                resta_unidades = True
+            else:
+                continue          # corrección de descripción y similares: no toca nada
+
+            devueltas["documentos"] += 1
+            for l in comprobantes.lineas(texto):
+                clave = l["sku"] or l["descripcion"][:40]
+                if clave not in por_sku:
+                    continue      # devolvió algo que no está en los pedidos leídos
+                if resta_unidades:
+                    por_sku[clave]["unidades"] -= l["unidades"]
+                    devueltas["unidades"] += l["unidades"]
+                por_sku[clave]["monto"] -= l["monto"]
+                devueltas["monto"] += l["monto"]
+
+        # Un producto puede quedar en cero o negativo si se devolvió todo.
+        por_sku = {k: v for k, v in por_sku.items()
+                   if v["unidades"] > 0.01 or v["monto"] > 0.01}
+
     productos = sorted(por_sku.values(), key=lambda x: -x["monto"])
     for p in productos:
         p["monto"] = round(p["monto"], 2)
@@ -225,12 +274,13 @@ async def compras(cliente_ruc: str, cantidad: int = 20) -> dict:
                         "que sí es comparable, y avisá del problema."),
         }
 
-    if notas:
-        resultado["ojo_notas_credito"] = {
-            "cantidad": notas,
-            "mensaje": (f"Hay {notas} nota(s) de crédito en esos pedidos. Estos "
-                        "totales NO las descuentan, así que puede haber "
-                        "mercadería devuelta contada como vendida. Decíselo."),
+    if devueltas["documentos"]:
+        resultado["devoluciones"] = {
+            "notas_credito": devueltas["documentos"],
+            "unidades": round(devueltas["unidades"], 1),
+            "monto": round(devueltas["monto"], 2),
+            "mensaje": ("Estos totales YA tienen descontado lo devuelto. No "
+                        "hace falta que lo aclares salvo que pregunten."),
         }
     return resultado
 
