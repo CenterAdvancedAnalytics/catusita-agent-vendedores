@@ -13,8 +13,17 @@ from vendedores.agentes.pedidos.tools import TOOLS
 # Lo que el orquestador ve de esta área. Es la PREGUNTA que contesta, no
 # la lista de sus tools: el orquestador delega en el área y es ella la que
 # decide cuáles usar y en qué orden.
+#
+# Dice también qué NO tiene y que resuelve el cliente sola. Sin eso el
+# orquestador pasa primero por `clientes` para "verificar" —un salto de más en
+# cada consulta— o delega igual algo que esta área no puede contestar y se
+# entera después de esperarla.
 DESCRIPCION = (
-    "Qué pidió un cliente y en qué va el despacho: estado, guía de remisión, si ya se entregó."
+    "Pedidos de un cliente y su despacho: estado del pedido, monto, N° de factura "
+    "SUNAT, notas de crédito, guía de remisión y si ya se entregó.\n"
+    "Le pasás el cliente por NOMBRE o RUC y ella lo resuelve dentro de la cartera "
+    "del asesor — no hace falta consultar `clientes` antes.\n"
+    "NO tiene: historial de compras, totales de venta ni acumulados por período."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]

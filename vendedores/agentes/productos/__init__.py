@@ -26,7 +26,12 @@ from vendedores.agentes.productos.tools import TOOLS
 # la lista de sus tools: el orquestador delega en el área y es ella la que
 # decide cuáles usar y en qué orden.
 DESCRIPCION = (
-    "Qué pieza es, si hay stock, cuánto vale y cómo se ve. Todo lo que sea catálogo, SKU, disponibilidad, precio o foto de un producto."
+    "Qué pieza es, si hay stock, cuánto vale y cómo se ve. Catálogo, SKU, "
+    "disponibilidad, precio y foto de un producto (la foto se manda al chat).\n"
+    "Buscá acá también las equivalencias entre marcas y para qué vehículo aplica "
+    "una pieza, que salen de la descripción del catálogo.\n"
+    "NO tiene: ficha técnica en PDF, ni compatibilidad por placa o VIN (para la "
+    "placa está el área `vehiculos`), ni en qué almacén físico está la mercadería."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]

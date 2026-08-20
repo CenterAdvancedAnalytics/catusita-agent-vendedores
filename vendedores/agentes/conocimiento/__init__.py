@@ -74,7 +74,11 @@ from vendedores.agentes.conocimiento.tools import TOOLS
 # la lista de sus tools: el orquestador delega en el área y es ella la que
 # decide cuáles usar y en qué orden.
 DESCRIPCION = (
-    "Cómo se hace algo en Catusita. Usala cuando la consulta no caiga en ninguna de las otras áreas."
+    "Cómo se hace algo en Catusita: procedimientos internos, a qué área derivar "
+    "y qué decirle. Usala cuando la consulta no caiga en ninguna de las otras.\n"
+    "Si no hay proceso escrito te lo dice, y entonces resolvés con tu criterio y "
+    "las áreas que tenés. No es un permiso: que no haya procedimiento no "
+    "significa que no se pueda atender."
 )
 
 
