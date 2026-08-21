@@ -1,8 +1,9 @@
 """Tools internas de `postventa` (clientes). El orquestador NO las ve.
 
-    Código a migrar:
-      - agents/claims.py
-      - db/models.py::create_claim
+SIN IMPLEMENTAR. `registrar_reclamo` levanta NotImplementedError y el área no
+compila NODO, así que `registro.tools_de_delegacion()` la omite: el orquestador
+de clientes no la ve y nadie puede saltar acá. Queda declarada para que el día
+que se implemente el contrato ya esté escrito.
 """
 from typing import Annotated
 

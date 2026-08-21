@@ -20,12 +20,15 @@ Era un error: convertía cada delegación en un viaje por Redis y obligaba a
 ejecución durable con checkpoints, perdiendo justamente el `Command(goto=...)`
 en proceso con el que el orquestador coordina. Ver plataforma/colas.py.
 
-── Los tres contenedores ──────────────────────────────────────────────────────
+── Quien encola y quienes consumen ────────────────────────────────────────────
 
-    catusita-agent          uvicorn main:app     webhook + router (encola)
-    catusita-vendedores     worker vendedores    grafo de vendedores
-    catusita-clientes       worker clientes      grafo de clientes
-    catusita-supervisores   worker supervisores  grafo de supervisores
+    catusita-recepcion      uvicorn recepcion.main:app   rutea por padrón y encola
+    catusita-vendedores     worker vendedores            grafo de vendedores
+    catusita-clientes       worker clientes              grafo de clientes
+    catusita-supervisores   worker supervisores          grafo de supervisores
+
+Los workers no tienen puerto: hablan con recepción solo por Redis. Fuera de esta
+cola corren `panel` (solo lectura) y `yahuar` (placas), que no consumen de acá.
 
 Un proceso por multiagente atiende todas sus conversaciones. En asyncio eso no
 las serializa: un `await` de 60 s contra la consulta de placas no bloquea el

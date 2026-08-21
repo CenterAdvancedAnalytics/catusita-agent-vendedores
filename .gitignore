@@ -29,8 +29,6 @@ plan_validacion_respuesta.md
 # Artefactos de QA locales
 qa_baseline_langgraph.txt
 qa_resultados_graph.txt
-=0.2.0
-=0.3.0
 
 # credenciales locales, nunca al repo
 conexion-dbeaver.txt

@@ -2,20 +2,17 @@
 
     uvicorn panel.main:app
 
-Sirve los datos que consume el front (`catu-panel`, React/Vite). Las rutas son
-las MISMAS que exponía `dashboard/panel.py` dentro de `catusita-agent`, para que
-repuntar el front sea cambiar una URL y nada más.
+Sirve los datos que consume el front (`catu-panel`, React/Vite). Conserva las
+rutas del panel que vivía dentro del monolito, para que repuntar el front sea
+cambiar una URL y nada más.
 
-── Qué cambió respecto del anterior ───────────────────────────────────────────
+── Las cuatro propiedades que lo definen ──────────────────────────────────────
 
-  · No depende de nada fuera de `panel/`. El anterior importaba
-    `orchestrator.context` y `shared.auth`, y esos dos archivos eran lo único
-    que mantenía vivo al stack viejo entero — casi 3.900 líneas.
+  · No depende de nada fuera de `panel/`. Su Dockerfile copia una sola carpeta.
 
   · No usa Redis. El historial se lee de Postgres, que es donde está persistido.
-    La vista «legacy» que leía conversaciones de Redis se retira: Redis guarda
-    diez mensajes con TTL de dos horas, o sea que esa vista mostraba un recorte
-    y se contradecía con el resto del panel.
+    Redis guarda diez mensajes con TTL de dos horas: un panel que leyera de ahí
+    mostraría un recorte y se contradiría con el resto de sus vistas.
 
   · El nombre del asesor sale de la tabla `vendedores`, no de un diccionario en
     el código.

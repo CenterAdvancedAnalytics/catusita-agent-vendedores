@@ -6,8 +6,8 @@
 #     consultas.py  el SQL, con los nombres de tabla escritos acá
 #     db.py         su pool de Postgres
 #
-# No entra nada de los multiagentes, ni de recepción, ni de codigo_obsoleto. Si
-# esta imagen construye, el panel corre.
+# No entra nada de los multiagentes ni de recepción. Si esta imagen construye,
+# el panel corre.
 #
 # Es el único servicio de solo lectura del sistema: no escribe una fila ni puede
 # correr una migración.
