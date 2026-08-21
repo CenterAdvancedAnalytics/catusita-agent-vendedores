@@ -227,12 +227,20 @@ def _desenvolver(cuerpo) -> dict | list:
     return cuerpo.get("data")
 
 
-def _bajar_bloqueante(url: str, timeout: float) -> bytes | None:
+def _bajar_bloqueante(url: str, timeout: float) -> tuple[bytes | None, str]:
+    """(contenido, motivo). El motivo distingue lo definitivo de lo transitorio.
+
+    `NO_EXISTE` es un 404: el archivo no está y no va a estar. Reintentar es
+    perder el tiempo del asesor, y decirle «probá más tarde» es mandarlo a
+    esperar algo que no va a pasar.
+    """
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
-            return r.read()
-    except Exception:
-        return None
+            return r.read(), ""
+    except urllib.error.HTTPError as e:
+        return None, "NO_EXISTE" if e.code == 404 else f"HTTP {e.code}"
+    except Exception as e:
+        return None, type(e).__name__
 
 
 async def descargar(url: str, timeout: float = 30.0) -> bytes | None:
@@ -260,6 +268,18 @@ async def descargar(url: str, timeout: float = 30.0) -> bytes | None:
     foto de un producto congelaría a todos los turnos que están en vuelo.
 
     Si algún día arreglan esa cabecera, esto vuelve a ser un `await _cliente().get(url)`.
+    """
+    contenido, _ = await asyncio.to_thread(_bajar_bloqueante, url, timeout)
+    return contenido
+
+
+async def descargar_con_motivo(url: str, timeout: float = 30.0) -> tuple[bytes | None, str]:
+    """Igual que `descargar`, pero dice POR QUÉ falló.
+
+    Existe porque «no se pudo bajar» tapa dos cosas muy distintas: que el
+    servidor esté caído —reintentar sirve— y que el archivo no exista
+    —reintentar no sirve nunca—. Quien llama necesita poder decirle al asesor
+    cuál de las dos es.
     """
     return await asyncio.to_thread(_bajar_bloqueante, url, timeout)
 

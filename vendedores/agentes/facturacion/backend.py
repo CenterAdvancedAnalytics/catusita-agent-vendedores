@@ -122,10 +122,24 @@ async def pdf(numero: str, tipo: str, empresa: str) -> dict:
         return {"error": "SIN_PDF",
                 "mensaje": f"El documento {numero} no tiene PDF emitido."}
 
-    contenido = await catusita_api.descargar(f["pdfUrl"], timeout=TIMEOUT_DESCARGA)
+    contenido, motivo = await catusita_api.descargar_con_motivo(
+        f["pdfUrl"], timeout=TIMEOUT_DESCARGA)
+
+    # Un 404 acá no es una caída: es que ese PDF no está publicado y no va a
+    # estarlo. Medido: las facturas de CATUSITA TIRE GROUP (empresa 03) viven en
+    # /FCFacturaPDF/ y esa carpeta está vacía — 10 de 10 dan 404. Las de
+    # REPUESTOS JAPONESES (empresa 04, /RJFacturaPDF/) bajan las 4 de 4.
+    #
+    # Se separan porque el asesor hace cosas distintas con cada una: ante la
+    # primera deja de insistir y pide el documento por otro canal; ante la
+    # segunda vuelve a intentar en un rato.
     if not contenido:
-        return {"error": "DESCARGA_FALLIDA",
-                "mensaje": f"No se pudo descargar el PDF de {numero}."}
+        if motivo == "NO_EXISTE":
+            return {"error": "PDF_NO_PUBLICADO",
+                    "numero": numero,
+                    "empresa": f.get("companyName") or "",
+                    "xml_url": f.get("xmlUrl") if f.get("hasXml") else ""}
+        return {"error": "DESCARGA_FALLIDA", "numero": numero, "motivo": motivo}
 
     return {
         "numero": f.get("documentNumber") or numero,
