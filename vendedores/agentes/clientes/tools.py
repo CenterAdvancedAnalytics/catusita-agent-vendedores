@@ -1,26 +1,25 @@
 """Tools de `clientes` (vendedores): quién es este cliente y es mío.
 
-Las dos son sensibles: devuelven límite de crédito, saldo y último pedido. Por
-eso `consultar_perfil_cliente` pasa por el control de cartera ANTES de tocar el
-backend — nunca al revés. Consultar primero y filtrar después significa que el
-dato ajeno ya salió.
+EXPERIMENTO: sin capa `backend`. Cada tool es su endpoint de Catusita y nada
+más — se manda lo que la API devuelve, crudo, con sus nombres de campo.
 
-`consultar_cartera` no lo necesita: solo puede devolver lo del asesor que
-pregunta, porque el vendedor_id sale de su perfil y no de un argumento.
+Lo único que queda entre el modelo y la API es el control de acceso, que no es
+transformación de datos: `consultar_perfil_cliente` verifica cartera ANTES de
+pegarle al endpoint, y `consultar_cartera` saca el `vendedor_id` del state para
+que el modelo no pueda pedir la cartera de otro.
 """
 import json
-from typing import Annotated, Optional
+from typing import Annotated
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from vendedores.agentes.clientes import backend
-from vendedores.plataforma_vendedores import acceso
+from vendedores.plataforma_vendedores import acceso, catusita_api
 
 
-def _responder(resultado: dict, tool_call_id: str) -> Command:
+def _responder(resultado, tool_call_id: str) -> Command:
     return Command(update={"messages": [ToolMessage(
         content=json.dumps(resultado, ensure_ascii=False, default=str),
         tool_call_id=tool_call_id)]})
@@ -30,29 +29,20 @@ def _responder(resultado: dict, tool_call_id: str) -> Command:
 async def consultar_cartera(
     state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    distrito: Optional[str] = None,
-    buscar: Optional[str] = None,
-    limite: Optional[int] = None,
 ) -> Command:
-    """Los clientes asignados a este asesor: cuántos son, en qué distritos y
-    una muestra con razón social, RUC, código, dirección y email.
+    """Los clientes asignados a este asesor.
+
+    Devuelve la cartera COMPLETA tal como la da Catusita: una fila por cliente
+    con `rucClient`, `nameClient`, `address`, `locality`, `codeClient` y `email`.
 
     Usar SIEMPRE que pregunten por «mis clientes», «mi cartera», «cuántos
-    clientes tengo». Nunca contestar eso de memoria.
-
-    NO devuelve la cartera entera de una: devuelve el total, el reparto por
-    distrito y los primeros. Para el resto están los filtros — la lista completa
-    no le sirve a nadie en un chat de WhatsApp.
-
-    `distrito`: filtra por zona («Surco», «Ate», «Cusco»)
-    `buscar`:   filtra por nombre o RUC
-    `limite`:   cuántos listar (default 25, tope 60)"""
+    clientes tengo». Nunca contestar eso de memoria."""
     vendedor_id = (state.get("perfil") or {}).get("vendedor_id")
     if not vendedor_id:
         return _responder({"error": "SIN_VENDEDOR"}, tool_call_id)
     return _responder(
-        await backend.cartera(vendedor_id, distrito=distrito, buscar=buscar,
-                              limite=limite or backend.MAX_CLIENTES),
+        await catusita_api.get("/api/client/CustomerbySeller",
+                               {"SellerId": vendedor_id}),
         tool_call_id)
 
 
@@ -62,16 +52,16 @@ async def consultar_perfil_cliente(
     state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Perfil de UN cliente: razón social, dirección, teléfono, tipo, asesor
-    asignado y estado.
+    """Perfil de UN cliente, tal como lo da Catusita.
 
     `cliente` puede ser el RUC o el nombre — se resuelve dentro de la cartera
     del asesor. Si el cliente no es suyo, la consulta no se ejecuta."""
-    perfil_asesor = state.get("perfil") or {}
-    ruc, error = await acceso.verificar(cliente, perfil_asesor)
+    ruc, error = await acceso.verificar(cliente, state.get("perfil") or {})
     if error:
         return _responder(error, tool_call_id)
-    return _responder(await backend.perfil(ruc), tool_call_id)
+    return _responder(
+        await catusita_api.get("/api/client/CustomerbyFilter", {"RUCClient": ruc}),
+        tool_call_id)
 
 
 TOOLS = [consultar_cartera, consultar_perfil_cliente]
