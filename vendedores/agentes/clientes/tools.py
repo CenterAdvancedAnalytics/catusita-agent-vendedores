@@ -49,10 +49,7 @@ async def consultar_cartera(
     `limite`:   cuántos listar (default 25, tope 60)"""
     vendedor_id = (state.get("perfil") or {}).get("vendedor_id")
     if not vendedor_id:
-        return _responder({
-            "error": "SIN_VENDEDOR",
-            "mensaje": "No se pudo identificar al asesor.",
-        }, tool_call_id)
+        return _responder({"error": "SIN_VENDEDOR"}, tool_call_id)
     return _responder(
         await backend.cartera(vendedor_id, distrito=distrito, buscar=buscar,
                               limite=limite or backend.MAX_CLIENTES),

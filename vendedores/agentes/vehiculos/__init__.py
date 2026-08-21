@@ -16,12 +16,7 @@ from vendedores.agentes.vehiculos.tools import TOOLS
 DESCRIPCION = (
     "Qué vehículo es una placa peruana: marca, modelo, año, VIN y motor. "
     "También manda la foto de la tarjeta al chat.\n"
-    "TARDA 30-60 SEGUNDOS y a veces más: no es una API, es un relay por "
-    "WhatsApp que atiende de a una consulta por vez. Avisale al asesor que "
-    "espere y no la pidas dos veces — el segundo pedido se encola detrás del "
-    "primero y tarda el doble.\n"
-    "Solo IDENTIFICA el vehículo. NO devuelve qué repuestos le sirven: con la "
-    "marca y el modelo en la mano, eso se busca después en `productos`."
+    "Tarda 30-60 segundos: avisale al asesor que espere y pedila una sola vez."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]

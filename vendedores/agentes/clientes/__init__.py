@@ -17,10 +17,7 @@ DESCRIPCION = (
     "Quién es un cliente y si está en la cartera del asesor: razón social, RUC, "
     "código, dirección, distrito, email y vendedor asignado. También la lista "
     "completa de la cartera y cuántos clientes tiene.\n"
-    "Solo la cartera PROPIA del asesor: la de otro vendedor no se puede pedir.\n"
-    "NO tiene: línea de crédito, deuda, saldo disponible, estado (activo/"
-    "suspendido), tipo de cliente ni fecha de última compra. Si preguntan por "
-    "crédito o cobranzas, esta área no lo resuelve — no la delegues para eso."
+    "Trabaja sobre la cartera propia del asesor."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]

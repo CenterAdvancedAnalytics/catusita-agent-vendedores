@@ -18,9 +18,7 @@ DESCRIPCION = (
     "están pagadas, el saldo, el vencimiento y si se canjearon por letras.\n"
     "Le pasás el cliente por NOMBRE o RUC más el N° de documento, y ella lo "
     "resuelve dentro de la cartera del asesor — no hace falta consultar "
-    "`clientes` antes. Si no sabés el N°, primero pedí los pedidos del cliente.\n"
-    "Es por UN documento puntual. NO hace el reporte de cobranzas de toda la "
-    "cartera, ni descarga guías de remisión (solo facturas y notas de crédito)."
+    "`clientes` antes. Si no sabés el N°, primero pedí los pedidos del cliente."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]

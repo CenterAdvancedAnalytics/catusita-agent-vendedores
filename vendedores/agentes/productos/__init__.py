@@ -29,9 +29,7 @@ DESCRIPCION = (
     "Qué pieza es, si hay stock, cuánto vale y cómo se ve. Catálogo, SKU, "
     "disponibilidad, precio y foto de un producto (la foto se manda al chat).\n"
     "Buscá acá también las equivalencias entre marcas y para qué vehículo aplica "
-    "una pieza, que salen de la descripción del catálogo.\n"
-    "NO tiene: ficha técnica en PDF, ni compatibilidad por placa o VIN (para la "
-    "placa está el área `vehiculos`), ni en qué almacén físico está la mercadería."
+    "una pieza, que salen de la descripción del catálogo."
 )
 
 __all__ = ["MODELO", "DESCRIPCION", "NODO", "TOOLS"]
