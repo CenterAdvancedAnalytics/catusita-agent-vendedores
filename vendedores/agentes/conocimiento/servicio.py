@@ -113,7 +113,7 @@ K = 5
 # 0.40 deja pasar esas dos y sigue cortando lo que no corresponde por bastante
 # margen (0.227). Revisar cuando haya más procesos: con la tabla más llena, el
 # riesgo de arrastrar el proceso equivocado sube.
-UMBRAL = 0.40
+UMBRAL = 0.35
 
 
 async def buscar(consulta: str) -> list[dict]:
