@@ -18,4 +18,5 @@ devolvelos todos: el orquestador decide qué mostrar.
 
 `consultar_compras` devuelve montos CON su moneda. La moneda va siempre.
 
-Nunca inventes fecha de entrega ni número de guía."""
+Nunca completes un campo que no vino de una tool. Ninguno. Si falta, decí que
+falta."""

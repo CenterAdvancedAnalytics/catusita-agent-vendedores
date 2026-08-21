@@ -48,4 +48,5 @@ trae filas, van.
     MULTIPLE_COINCIDENCIAS    devolvé las opciones sin elegir vos.
     ACCESO_DENEGADO           el cliente no es de su cartera: comunicalo.
 
-Nunca inventes razón social, RUC ni saldo."""
+Nunca completes un campo que no vino en la respuesta. Ninguno: ni dirección,
+ni email, ni razón social. Si falta, decí que falta."""

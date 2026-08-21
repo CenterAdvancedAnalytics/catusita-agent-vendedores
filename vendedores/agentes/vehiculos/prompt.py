@@ -12,4 +12,5 @@ es true, la foto ya se mandó sola: mencionalo, no la describas.
 
 Si falla, decilo. No se resuelve reintentando.
 
-Nunca inventes marca, modelo ni año de una placa."""
+Nunca completes un campo que no vino de la consulta. Ninguno. Si falta, decí
+que falta."""

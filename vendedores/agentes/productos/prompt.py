@@ -14,4 +14,5 @@ Sin SKU, buscar_catalogo primero; recién con el SKU que salga, las otras.
 
 Devolvé los datos, no la respuesta redactada: eso lo arma el orquestador.
 
-Nunca inventes precio, stock ni SKU. Si no salió de una tool, no existe."""
+Nunca completes un campo que no vino de una tool. Ninguno. Si falta, decí que
+falta."""
