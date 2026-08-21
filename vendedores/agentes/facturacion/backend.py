@@ -135,10 +135,11 @@ async def pdf(numero: str, tipo: str, empresa: str) -> dict:
     # segunda vuelve a intentar en un rato.
     if not contenido:
         if motivo == "NO_EXISTE":
+            # Sin `xml_url` a propósito: el XML no se manda por este canal, y
+            # ofrecerlo es prometer algo que ninguna tool puede cumplir.
             return {"error": "PDF_NO_PUBLICADO",
                     "numero": numero,
-                    "empresa": f.get("companyName") or "",
-                    "xml_url": f.get("xmlUrl") if f.get("hasXml") else ""}
+                    "empresa": f.get("companyName") or ""}
         return {"error": "DESCARGA_FALLIDA", "numero": numero, "motivo": motivo}
 
     return {
@@ -150,7 +151,6 @@ async def pdf(numero: str, tipo: str, empresa: str) -> dict:
         "pdf_base64": base64.b64encode(contenido).decode(),
         "filename": f"{f.get('documentNumber') or numero}.pdf",
         "mime": "application/pdf",
-        "xml_url": f.get("xmlUrl") if f.get("hasXml") else "",
     }
 
 

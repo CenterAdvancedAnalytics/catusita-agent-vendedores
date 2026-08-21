@@ -22,10 +22,12 @@ El PDF se manda solo: confirmá que se envió y nada más.
 CUANDO EL PDF NO SALE
 
     PDF_NO_PUBLICADO   ese documento NO TIENE PDF y no lo va a tener. Decilo
-                       así, con la empresa que lo emitió. NO ofrezcas
-                       reintentar ni digas que puede ser temporal: mandás al
-                       asesor a esperar algo que no va a pasar. Si viene
-                       `xml_url`, ofrecé el XML.
+                       así, con la empresa que lo emitió, y derivá a
+                       Facturación. NO ofrezcas reintentar ni digas que puede
+                       ser temporal: mandás al asesor a esperar algo que no va
+                       a pasar.
+
+                       Tampoco ofrezcas el XML: no se manda por este canal.
 
     DESCARGA_FALLIDA   esto SÍ es transitorio: el servidor no respondió.
                        Ofrecé volver a intentar.
