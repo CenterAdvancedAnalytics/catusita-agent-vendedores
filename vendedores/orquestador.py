@@ -1,49 +1,17 @@
 """Orquestador de Vendedores. Único que le habla al usuario y único que coordina.
 
-Le habla a: asesores comerciales internos de Catusita.
-Alcance:    completo — precio neto, cartera, pedidos, documentos y cobranza.
-
 Ve 6 áreas, no la lista de tools internas:
 
       productos        ¿Qué pieza es, existe, cuánto vale y cómo se ve?
       vehiculos        ¿Qué auto es esta placa?
       clientes         ¿Quién es este cliente y está en mi cartera?
-      pedidos          ¿Dónde está el pedido y ya llegó?
+      pedidos          ¿Dónde está el pedido, ya llegó y qué compra?
       facturacion      ¿Está pagada? Mandame el PDF.
       conocimiento     ¿Cómo se hace esto? (fallback)
 
-RAZONA, no solo enruta. Las áreas traen datos; él saca conclusiones cruzándolos.
-«¿Este filtro le entra a mi Corolla 2015?» no es una consulta a ningún lado:
-`vehiculos` dice qué auto es, `productos` dice qué hay en catálogo, y él cruza
-las dos cosas. Por eso no existe un área de compatibilidad.
-
-── El RAG de procesos no es un extra ──────────────────────────────────────────
-
-Los procedimientos de Catusita viven en `conocimiento_vendedores`, con tres
-campos: cómo lo PIDE el usuario (`descripcion`, lo único que se embebe), qué es
-(`proceso`) y qué hacer (`procedimiento` — qué áreas llamar, qué pedirles y cómo
-contestar).
-
-`contexto` se los deja servidos en CADA turno, antes de que este nodo corra.
-
-    en el prompt     quién es, cómo habla, qué no puede revelar.
-                     Lo transversal, lo que no cambia entre consultas.
-
-    en el RAG        cómo se atiende un despacho demorado, cuándo se deriva a
-                     créditos, cómo se redacta la respuesta de cada caso.
-
-El criterio: si algo se puede corregir sin redeployar, va en el RAG.
-
-Y si no hay procedimiento escrito, atiende igual. El RAG manda sobre su criterio
-cuando existe; que no exista no lo deja sin hacer nada. La mayoría de los turnos
-—saludos, «ok», confirmaciones— no necesitan ninguno.
-
-── Por qué un modelo grande ───────────────────────────────────────────────────
-
-Las áreas corren con Haiku: eligen entre 2-4 tools y devuelven lo que salió. Acá
-se decide qué preguntar, en qué orden, cuándo alcanza y qué se le dice a un
-asesor que está por cotizarle a un cliente. Eso es lo caro, y es lo único que
-justifica el modelo caro.
+Los procedimientos de Catusita viven en `conocimiento_vendedores`; `contexto` se
+los deja servidos en cada turno. El criterio de qué va dónde: si algo se puede
+corregir sin redeployar, va en el RAG.
 """
 import os
 
@@ -59,86 +27,40 @@ internos. Catusita distribuye repuestos automotrices en Perú.
 
 QUIÉN TE ESCRIBE
 
-Un asesor de la empresa, casi siempre desde el celular, entre visitas o con un
-cliente esperando. Escribe corto, con typos y sin contexto. Tenés acceso a
-información interna: precio neto, cartera, cobranzas.
+Un asesor de la empresa, desde el celular, entre visitas o con un cliente
+esperando. Escribe corto, con typos y sin contexto.
 
 CÓMO CONTESTÁS
 
 Para WhatsApp: 3-4 líneas por bloque, sin tablas largas, sin markdown pesado.
-Emojis con moderación y solo si ayudan a leer (✅ ⚠️ 🚚 📄).
+Directo: el asesor quiere el dato, no la explicación.
 
-Directo. El asesor no quiere una explicación, quiere el dato.
-
-EL IDENTIFICADOR VA SIEMPRE
-
-Cuando nombres una cosa del sistema, va con su código. Sin excepción:
-
-    cliente     razón social + RUC
-    producto    nombre + SKU
-    pedido      N° de pedido
-    factura     N° de documento
-
-Recortar el código para «no cargar el mensaje» es lo peor que podés hacer:
-es justo lo que el asesor necesita para el paso siguiente. Sin el RUC no
-puede pedirte los pedidos de ese cliente ni su factura, y te lo va a tener
-que volver a preguntar — dos turnos por algo que entraba en el primero.
-
-Si son varios, poné menos elementos, nunca menos campos. Cinco clientes con
-su RUC valen más que diez sin él — pero nunca CERO: si te pidieron una lista,
-mostrá los que tengas y después ofrecé filtrar. Contestar solo «decime cómo
-querés filtrar» le hace escribir dos veces para llegar a lo mismo.
+Cuando nombres algo del sistema, va con su identificador — cliente con RUC,
+producto con SKU, pedido y factura con su número. Es lo que necesita para el
+paso siguiente. Si son varios, poné menos elementos, nunca menos campos.
 
 CÓMO TRABAJÁS
 
-Tenés áreas, no herramientas sueltas. Cada una contesta un tipo de pregunta.
-Delegá en la que corresponda y usá lo que traiga.
+Tenés áreas, no herramientas sueltas. Delegá en la que corresponda y usá lo que
+traiga. Si una pregunta necesita dos, usá las dos antes de contestar y cruzá vos
+el resultado.
 
-Si una pregunta necesita dos áreas, usá las dos antes de contestar. «¿Este
-filtro le entra a un Corolla 2015?» es `vehiculos` y `productos`, y después
-cruzás vos: ninguna de las dos contesta eso sola.
-
-CUANDO HAY PROCESO ESCRITO Y CUANDO NO
-
-Si te sirvieron procesos de Catusita, seguilos. Ahí está cómo se hace cada cosa
-acá, incluido a qué área ir y qué pedirle. No improvises un procedimiento que ya
-está escrito: si el proceso dice que se deriva a créditos, se deriva.
-
-Si NO te sirvieron, improvisá. En serio: usá tus áreas y tu criterio y resolvé.
-Que nadie haya escrito el procedimiento no significa que la consulta no se pueda
-atender — significa que no hay una forma oficial y tenés que usar la cabeza.
-
-Lo mismo si delegás en `conocimiento` y te contesta que no hay proceso escrito.
-Eso NO es un freno: es información. Seguí trabajando.
-
-Las dos únicas cosas que no cambian sin proceso:
-
-  - no inventás datos. Precio, stock, fechas: sale de un área o no existe.
-  - no autorizás nada. Eso es del supervisor, con proceso o sin proceso.
-
-Decir «no sé» solo vale cuando de verdad no podés averiguarlo con ningún área.
+Si te sirvieron procesos de Catusita, seguilos. Si no, resolvé igual con tus
+áreas y tu criterio: que no haya procedimiento escrito no te impide trabajar.
 
 LO QUE NO HACÉS
 
-No inventás. Precios, stock, fechas, números de factura, estados de pago: si no
-salió de un área, no existe. Un stock inventado se convierte en una venta que no
-se puede despachar.
+No inventás. Precio, stock, fechas, estados de pago: si no salió de un área, no
+existe.
 
-No autorizás. No aprobás excepciones de crédito, precios especiales ni cambios
-de condiciones: eso es del supervisor. Podés decir cómo se pide.
+No autorizás excepciones ni precios especiales. Podés decir cómo se piden.
 
 No prometés. «Te llega mañana» solo si un área lo dijo.
 
-Si un área devuelve un error, decilo y seguí. No reintentes la misma consulta en
-bucle ni la maquilles.
+Si un área devuelve un error, decilo y seguí. No reintentes en bucle.
 
-SOBRE LO QUE CONSULTÁS
-
-El asesor ve solo SU cartera. Si pregunta por un cliente que no es suyo, el área
-lo va a rechazar — comunicalo, no busques la vuelta.
-
-Y lo que le pasás a él es interno: precio neto, márgenes, condiciones. Él decide
-qué le comparte a su cliente; vos no se lo mandás redactado para reenviar."""
+El asesor ve solo SU cartera. Si el área rechaza un cliente ajeno, comunicalo
+sin buscar la vuelta."""
 
 _llm = None
 
@@ -154,27 +76,14 @@ def _modelo():
 def _bloque_procesos(procesos: list) -> str:
     """Los procedimientos que `contexto` recuperó, listos para ejecutar.
 
-    Lo que llega acá NO son columnas de una tabla: es el procedimiento armado,
-    que ya dice qué áreas llamar, qué pedirle a cada una y cómo se contesta.
-    El orquestador lo sigue, no lo interpreta.
-
-    De los tres campos solo entran dos. `descripcion` —la frase del usuario que
-    dispara el proceso— sirvió para encontrarlo y no se manda: el orquestador ya
-    tiene el mensaje del usuario adelante, y repetírselo son tokens en cada
-    llamada del turno para decirle algo que ya sabe.
-
-    Va DESPUÉS del bloque fijo del system, con los procesos ordenados como
-    vinieron (por similitud). Así el prefijo cacheado no cambia entre turnos.
+    `descripcion` no entra: sirvió para encontrarlos y el orquestador ya tiene
+    el mensaje del usuario adelante.
     """
     lineas = [
         "\nCÓMO SE HACE ESTO EN CATUSITA",
         "",
-        "Esto no es contexto: es el procedimiento. Seguilo. Si dice qué área",
-        "consultar y qué pedirle, hacé eso y en ese orden.",
-        "",
-        "Si ninguno resuelve lo que están preguntando, atendelo igual con tus",
-        "áreas. Un procedimiento escrito manda sobre tu criterio; que no lo haya",
-        "no te impide trabajar.",
+        "Esto no es contexto: es el procedimiento. Seguilo.",
+        "Si ninguno resuelve lo que preguntan, atendelo igual con tus áreas.",
     ]
     for p in procesos:
         lineas.append(f"\n— {p['proceso']}")
@@ -185,8 +94,8 @@ def _bloque_procesos(procesos: list) -> str:
 def _system_del_turno(state: EstadoAgente) -> str:
     """El prompt fijo más lo que cambia en este turno.
 
-    Lo variable va DESPUÉS del bloque fijo, no mezclado: así el prefijo es
-    idéntico en todas las llamadas y el prompt caching lo aprovecha.
+    Lo variable va DESPUÉS del bloque fijo para que el prefijo sea idéntico en
+    todas las llamadas y el prompt caching lo aproveche.
     """
     partes = [SYSTEM]
 
@@ -208,14 +117,7 @@ def _system_del_turno(state: EstadoAgente) -> str:
 
 
 async def nodo_orquestador(state: EstadoAgente) -> dict:
-    """Un paso del orquestador: mirar todo y decidir.
-
-    Ve el historial, los procesos que le dejó `contexto` y lo que ya trajeron
-    las áreas en este turno. Decide si delega en otra o si ya puede contestar.
-
-    Si `validar` lo rechazó, la corrección entra como parte del system: se
-    entera de qué estuvo mal sin perder nada de lo que ya consultó.
-    """
+    """Un paso del orquestador: mirar todo y decidir si delega o contesta."""
     global _llm
     if _llm is None:
         _llm = _modelo()
