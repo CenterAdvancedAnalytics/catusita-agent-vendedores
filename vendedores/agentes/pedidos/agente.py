@@ -7,9 +7,10 @@ Salidas permitidas (las fuerza vendedores/grafo.py):
   - NO va a otra área
   - NO va a END: toda respuesta pasa por `validar`
 
-Comparte EstadoAgente con el padre para poder escribir `messages` —que el
-orquestador vea qué se consultó, sin que el área se lo resuma— y
-`media_pendiente`, que el worker manda al final del turno.
+Recibe el estado del turno con `messages` REEMPLAZADO por la consulta que
+escribió el orquestador: arranca limpio, sin historial ni lo que dijeron otras
+áreas. De vuelta sale un ToolMessage con su texto final, más `media_pendiente`,
+que tiene reducer de suma. Lo hace `_envolver_area` en el grafo del multiagente.
 """
 import os
 

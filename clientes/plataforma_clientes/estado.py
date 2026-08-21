@@ -29,7 +29,7 @@ class EstadoAgente(TypedDict):
     # a ese mismo tool_call_id.
     encargo: dict
 
-    perfil: dict          # lo resolvió el router
+    perfil: dict          # lo arma el worker con _perfil(), antes de invocar
     historial: list       # lo trae el nodo contexto
 
     # Los procedimientos de Catusita que aplican a este turno. Los recupera

@@ -11,17 +11,23 @@ Salidas permitidas (las fuerza el grafo padre):
   - NO va a otra área
   - NO va a END: toda respuesta pasa por `validar`
 
-── Por qué comparte EstadoAgente con el padre ─────────────────────────────────
+── Qué recibe y qué devuelve ──────────────────────────────────────────────────
 
-Podría tener su propio esquema y traducir en la frontera. No lo hace porque
-necesita escribir dos cosas que son del turno completo, no del área:
+El estado del turno con `messages` REEMPLAZADO por la consulta que escribió el
+orquestador. Arranca limpio: no ve el historial ni lo que dijeron otras áreas.
+El resto del estado —`perfil`, `conversacion`— sí viaja.
 
-    messages          para que el orquestador vea qué se consultó y con qué
-                      resultado, sin que el área se lo resuma
-    media_pendiente   las fotos, que las manda recepción al final del turno
+De vuelta salen dos cosas:
 
-Traducir en la frontera obligaría a que el área decidiera qué vale la pena
-contarle al orquestador, y esa decisión es justo la que no queremos que tome.
+    un ToolMessage    con el texto final de este subgrafo, contra el
+                      tool_call_id de la delegación
+    media_pendiente   las fotos, que tiene reducer de suma y las manda
+                      recepción al final del turno
+
+O sea que el orquestador NO ve el JSON crudo de las tools: ve lo que este
+modelo escribió. Si un dato no entra en ese texto, no existe río abajo.
+
+Lo hace `_envolver_area` en clientes/grafo.py.
 
 ── Por qué un modelo chico ────────────────────────────────────────────────────
 
