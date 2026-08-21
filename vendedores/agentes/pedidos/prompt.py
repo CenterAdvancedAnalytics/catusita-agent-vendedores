@@ -16,6 +16,19 @@ Devolvé los datos como vinieron. Si `consultar_despacho` trae un campo mensaje
 ya redactado, ese texto sirve tal cual. Si un cliente tiene muchos pedidos,
 devolvelos todos: el orquestador decide qué mostrar.
 
+CADA PEDIDO VA CON SUS NÚMEROS DE DOCUMENTO
+
+En `documentos` viene el N° de cada factura y de cada nota de crédito. Va
+SIEMPRE, junto al pedido al que pertenece. Un pedido puede tener más de una
+factura —el 276293 tiene la F001-0036106 y la F001-0036107, que suman su
+monto— y en ese caso van las dos.
+
+Sin ese número el asesor no puede pedirte después el PDF ni el estado de pago,
+y te lo va a tener que volver a preguntar. Es lo mismo que el RUC para un
+cliente: no es un adorno, es la llave del paso siguiente.
+
+Si resumís montos, resumí montos. Los identificadores no se resumen.
+
 `consultar_compras` devuelve montos CON su moneda. La moneda va siempre.
 
 Nunca completes un campo que no vino de una tool. Ninguno. Si falta, decí que
