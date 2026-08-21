@@ -94,9 +94,26 @@ K = 5
 # transporte». Redactarla en idioma de manual bajó la similitud de 0.463 a 0.390
 # en la misma consulta — medido, no estimado.
 #
-# Recalibrar cuando haya procesos reales cargados, midiendo contra consultas
-# reales de los chats.
-UMBRAL = 0.50
+# ── Recalibrado a 0.40 con el primer proceso real ─────────────────────────────
+#
+# Medido contra «Stock del PP530», que es como escribe un asesor de verdad:
+#
+#     0.456   'Stock del PP530'          -> el proceso de stock cero
+#     0.407   'cuanto queda del C-1011'  -> el mismo
+#     0.227   'dame el perfil de un cliente' -> nada, y está bien
+#
+# Con 0.50 los dos primeros quedaban afuera y el proceso era inalcanzable: se
+# cargó, se recuperaba en el top-k y esta línea lo descartaba.
+#
+# El problema no es la redacción de la `descripcion` — se probaron cuatro y
+# ninguna pasó de 0.483. Es que estas consultas son cortas y llevan un SKU
+# adentro, que no significa nada semánticamente y hunde la similitud. Ese tipo
+# de consulta es la mayoría del tráfico de este multiagente.
+#
+# 0.40 deja pasar esas dos y sigue cortando lo que no corresponde por bastante
+# margen (0.227). Revisar cuando haya más procesos: con la tabla más llena, el
+# riesgo de arrastrar el proceso equivocado sube.
+UMBRAL = 0.40
 
 
 async def buscar(consulta: str) -> list[dict]:
