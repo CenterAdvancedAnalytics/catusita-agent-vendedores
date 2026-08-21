@@ -27,7 +27,15 @@ from vendedores.plataforma_vendedores import acceso
 
 # Cuántos clientes entran en un mensaje de WhatsApp sin que el asesor deje de
 # leer. Para el resto están los filtros, que trabajan sobre lo ya traído.
-MAX_LISTA = 25
+#
+# Era 25, y el modelo listaba 10 igual — dos veces seguidas, medido. Pero
+# narraba "los primeros 25" y "y 149 más" (174 - 25), porque esos números salían
+# del payload. O sea: decía 25, mostraba 10, y el faltante estaba mal.
+#
+# El modelo tenía razón sobre cuántos entran en un WhatsApp. Ahora el payload
+# dice lo mismo que va a hacer, y los tres números cierran solos sin pedírselo
+# al prompt.
+MAX_LISTA = 10
 
 
 def _responder(resultado, tool_call_id: str) -> Command:
