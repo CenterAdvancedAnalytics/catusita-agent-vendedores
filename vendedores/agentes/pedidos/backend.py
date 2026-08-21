@@ -112,10 +112,23 @@ async def pedidos(cliente_ruc: str, estado: str | None = None,
             "documentos": [_documento(d) for d in (o.get("salesDocuments") or [])],
         })
 
+    # Sumado acá y no por el modelo. Medido sobre estos mismos 10 pedidos: el
+    # Haiku del área dio 16.650,30 y el Sonnet del orquestador 18.650,30. La
+    # suma real es 17.450,29 — dos modelos, dos errores distintos, los mismos
+    # diez números. Y ninguno de los dos puede notar que se equivocó.
+    #
+    # Va POR MONEDA: un cliente puede tener pedidos en USD y en soles, y un solo
+    # número sería un total falso.
+    por_moneda: dict[str, float] = {}
+    for p in lista:
+        m = p.get("moneda") or "?"
+        por_moneda[m] = round(por_moneda.get(m, 0.0) + float(p.get("monto") or 0), 2)
+
     return {
         "ruc": cliente_ruc,
         "cliente": (ordenes[0].get("clientName") if ordenes else "") or "",
         "total_pedidos": len(lista),
+        "total_por_moneda": por_moneda,
         "pedidos": lista,
     }
 

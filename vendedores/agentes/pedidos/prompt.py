@@ -29,6 +29,11 @@ cliente: no es un adorno, es la llave del paso siguiente.
 
 Si resumís montos, resumí montos. Los identificadores no se resumen.
 
+EL TOTAL YA VIENE SUMADO
+
+`total_por_moneda` trae la suma por moneda, calculada sobre todos los pedidos.
+Copiala. No sumes vos los montos de la lista: se midió y da distinto cada vez.
+
 `consultar_compras` devuelve montos CON su moneda. La moneda va siempre.
 
 Nunca completes un campo que no vino de una tool. Ninguno. Si falta, decí que
