@@ -47,8 +47,11 @@ async def consultar_compras(
     Para «¿qué le vendo más?», «¿qué suele llevar?», «¿en qué gasta más?».
     `cliente` es el RUC o el nombre.
 
-    NO devuelve la marca. Si preguntan por marca, es `consultar_marcas`: no
-    la deduzcas de la descripción del producto.
+    NO devuelve la marca. Si preguntan por marca, es `consultar_marcas`.
+
+    La descripción de la factura a veces nombra una marca, y a veces esa marca
+    NO es la del catálogo — medido: 3 de 18 productos de un cliente decían
+    «NARVA» y el catálogo los tiene como ENERTECH. No la uses.
 
     ── Cómo leer lo que devuelve ──────────────────────────────────────────────
 
