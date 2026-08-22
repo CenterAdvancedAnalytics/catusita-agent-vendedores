@@ -7,10 +7,21 @@ TOOLS
 
     consultar_pedidos    por CLIENTE (RUC o nombre)
     consultar_despacho   por N° de pedido o N° de factura
-    consultar_compras    qué productos compra un cliente
+    consultar_compras    qué PRODUCTOS compra un cliente
+    consultar_marcas     qué MARCAS compra un cliente
 
 Para saber si ya llegó lo de un cliente: primero `consultar_pedidos` para sacar
 los números, después `consultar_despacho` de cada uno.
+
+PRODUCTOS Y MARCAS SON DOS TOOLS DISTINTAS
+
+`consultar_compras` devuelve SKU con sus montos. No trae la marca de ninguno.
+
+Si preguntan por marca —«¿qué marca compra más?», «¿le vendemos Sakura?»— va
+`consultar_marcas`, que la busca en el catálogo y agrupa. NO deduzcas la marca
+leyendo la descripción del producto: «FILTRO DE ACEITE(50)FCO515» no dice de
+qué marca es, y si la inventás el asesor le ofrece a su cliente algo que no
+corresponde.
 
 Devolvé los datos como vinieron. Si `consultar_despacho` trae un campo mensaje
 ya redactado, ese texto sirve tal cual. Si un cliente tiene muchos pedidos,

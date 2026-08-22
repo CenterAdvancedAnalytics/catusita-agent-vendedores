@@ -42,10 +42,13 @@ async def consultar_compras(
     tool_call_id: Annotated[str, InjectedToolCallId],
     pedidos: Optional[int] = None,
 ) -> Command:
-    """QUÉ PRODUCTOS compra un cliente: lo que más lleva y de qué marca.
+    """QUÉ PRODUCTOS compra un cliente: los SKU que más lleva.
 
-    Para «¿qué le vendo más?», «¿qué suele llevar?», «¿qué marca prefiere?»,
-    «¿en qué gasta más?». `cliente` es el RUC o el nombre.
+    Para «¿qué le vendo más?», «¿qué suele llevar?», «¿en qué gasta más?».
+    `cliente` es el RUC o el nombre.
+
+    NO devuelve la marca. Si preguntan por marca, es `consultar_marcas`: no
+    la deduzcas de la descripción del producto.
 
     ── Cómo leer lo que devuelve ──────────────────────────────────────────────
 
@@ -74,6 +77,33 @@ async def consultar_compras(
 
 
 @tool
+async def consultar_marcas(
+    cliente: str,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    pedidos: Optional[int] = None,
+) -> Command:
+    """Qué MARCAS compra un cliente, ordenadas por plata.
+
+    Para «¿qué marca compra más?», «¿de qué marca le vendemos?», «¿es cliente
+    de Valvoline o de Sakura?».
+
+    `cliente` es el RUC o el nombre. Devuelve `por_marca` con el monto, las
+    unidades y cuántos SKU distintos lleva de cada una — ya sumado sobre TODOS
+    sus productos, no sobre una muestra.
+
+    Los totales vienen calculados: copialos, no los recalcules.
+
+    Si preguntan por PRODUCTOS y no por marcas, usá `consultar_compras`."""
+    ruc, error = await acceso.verificar(cliente, state.get("perfil") or {})
+    if error:
+        return _responder(error, tool_call_id)
+    return _responder(
+        await backend.marcas(ruc, cantidad=pedidos or backend.PEDIDOS_POR_DEFECTO),
+        tool_call_id)
+
+
+@tool
 async def consultar_despacho(
     tool_call_id: Annotated[str, InjectedToolCallId],
     pedido_id: Optional[str] = None,
@@ -93,4 +123,4 @@ async def consultar_despacho(
     return _responder(await backend.despacho(pedido_id, factura), tool_call_id)
 
 
-TOOLS = [consultar_pedidos, consultar_compras, consultar_despacho]
+TOOLS = [consultar_pedidos, consultar_compras, consultar_marcas, consultar_despacho]

@@ -133,7 +133,69 @@ async def pedidos(cliente_ruc: str, estado: str | None = None,
     }
 
 
-async def compras(cliente_ruc: str, cantidad: int = 20) -> dict:
+async def _marca(sku: str) -> str:
+    """La marca de un SKU, del catálogo. Vacío si no está."""
+    d = await catusita_api.get("/api/article/filter", {"ItemCode": sku})
+    return (d[0].get("brandName") or "") if isinstance(d, list) and d else ""
+
+
+async def marcas(cliente_ruc: str, cantidad: int = 20) -> dict:
+    """Qué MARCAS compra un cliente, ordenadas por plata.
+
+    Contesta «¿qué marca compra más este cliente?» de una sola llamada.
+
+    Hace el mismo recorrido que `compras()` —pedidos, facturas, XML— y le suma
+    un paso: la marca de cada SKU, del catálogo. Es a propósito que repita ese
+    trabajo en vez de colgarse de `compras()`: aquella devuelve el TOP 10 de
+    productos, y agrupar marcas sobre diez de cien líneas da un ranking falso.
+    Acá se agrupa sobre TODOS los SKU y recién ahí se ordena.
+
+    Las marcas van completas, no recortadas: son pocas —un cliente real dio
+    cuatro— y son la respuesta.
+    """
+    detalle = await compras(cliente_ruc, cantidad=cantidad, _completo=True)
+    if detalle.get("error"):
+        return detalle
+
+    todos = detalle.pop("_todos", [])
+    if not todos:
+        return {"cliente": detalle.get("cliente", ""), "ruc": cliente_ruc,
+                "error": "SIN_DETALLE",
+                "mensaje": "No se pudo leer el detalle de sus facturas."}
+
+    # Una consulta al catálogo por SKU, todas en paralelo. Medido: 10 SKU en
+    # 0.1s. El endpoint de artículos tolera concurrencia.
+    encontradas = await asyncio.gather(*(_marca(p["sku"]) for p in todos))
+
+    agrupado: dict[str, dict] = {}
+    for p, m in zip(todos, encontradas):
+        clave = m or "(sin marca en el catálogo)"
+        acum = agrupado.setdefault(clave, {"marca": clave, "monto": 0.0,
+                                           "unidades": 0.0, "skus": 0})
+        acum["monto"] += p["monto"]
+        acum["unidades"] += p["unidades"]
+        acum["skus"] += 1
+
+    ranking = sorted(agrupado.values(), key=lambda x: -x["monto"])
+    for r in ranking:
+        r["monto"] = round(r["monto"], 2)
+        r["unidades"] = round(r["unidades"], 1)
+
+    return {
+        "cliente": detalle.get("cliente", ""),
+        "ruc": cliente_ruc,
+        "moneda": detalle.get("moneda", ""),
+        "pedidos_revisados": detalle.get("pedidos_revisados", 0),
+        "facturas_leidas": detalle.get("facturas_leidas", 0),
+        "skus_distintos": len(todos),
+        "por_marca": ranking,
+        **({"ojo_monedas": detalle["ojo_monedas"]} if "ojo_monedas" in detalle else {}),
+        **({"devoluciones": detalle["devoluciones"]} if "devoluciones" in detalle else {}),
+    }
+
+
+async def compras(cliente_ruc: str, cantidad: int = 20,
+                  _completo: bool = False) -> dict:
     """Qué productos compró un cliente, sacados del XML de sus facturas.
 
     ── Por qué existe y por qué es la única que hace tres saltos ──────────────
@@ -278,6 +340,12 @@ async def compras(cliente_ruc: str, cantidad: int = 20) -> dict:
         "por_monto": productos[:MAX_PRODUCTOS],
         "por_unidades": sorted(productos, key=lambda x: -x["unidades"])[:MAX_PRODUCTOS],
     }
+
+    # Para `marcas()`, que necesita agrupar sobre TODOS los SKU y no sobre el
+    # top 10. Se saca con `pop` antes de devolverlo, así nunca llega al modelo:
+    # son cien líneas que no le sirven y que le costarían contexto.
+    if _completo:
+        resultado["_todos"] = [p for p in productos if p.get("sku")]
 
     if len(monedas) > 1:
         resultado["ojo_monedas"] = {
