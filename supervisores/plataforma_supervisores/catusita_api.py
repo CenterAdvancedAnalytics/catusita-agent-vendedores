@@ -69,7 +69,7 @@ TIMEOUT = 20.0
 # Importa mucho más de lo que parece, porque nadie escribe estas llamadas en
 # paralelo a propósito: LangGraph ejecuta las tool calls de un mismo turno
 # concurrentemente. Un asesor que pregunta por dos clientes a la vez disparaba
-# dos `consultar_pedidos` y uno volvía con error 500 — sin que nada en el código
+# dos consultas de pedidos y una volvía con error 500 — sin que nada en el código
 # del área insinuara que eso podía pasar.
 #
 # ── Por qué el lock es de Redis y no un asyncio.Lock ─────────────────────────

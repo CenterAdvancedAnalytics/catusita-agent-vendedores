@@ -169,8 +169,10 @@ async def marcas(cliente_ruc: str, cantidad: int = 20) -> dict:
     productos, y agrupar marcas sobre diez de cien líneas da un ranking falso.
     Acá se agrupa sobre TODOS los SKU y recién ahí se ordena.
 
-    Las marcas van completas, no recortadas: son pocas —un cliente real dio
-    cuatro— y son la respuesta.
+    Las marcas van completas, no recortadas: son pocas y son la respuesta. Que
+    lleguen enteras al asesor NO se decide acá — esto es un docstring de
+    backend, y el modelo no lo lee. La regla vive en la docstring de
+    `marcas_mas_compradas`, que sí se le manda como descripción de la tool.
     """
     detalle = await compras(cliente_ruc, cantidad=cantidad, _completo=True)
     if detalle.get("error"):
@@ -196,9 +198,16 @@ async def marcas(cliente_ruc: str, cantidad: int = 20) -> dict:
         acum["skus"] += 1
 
     ranking = sorted(agrupado.values(), key=lambda x: -x["monto"])
+
+    # El peso de cada marca se calcula acá por la misma razón que
+    # `total_por_moneda`: es una división, y una división que hace el modelo
+    # sale mal sin dar error. «Es su marca estrella» necesita un número al lado,
+    # y si no se lo damos se lo inventa.
+    total = sum(r["monto"] for r in ranking)
     for r in ranking:
         r["monto"] = round(r["monto"], 2)
         r["unidades"] = round(r["unidades"], 1)
+        r["porcentaje"] = round(r["monto"] / total * 100, 1) if total else 0.0
 
     return {
         "cliente": detalle.get("cliente", ""),
@@ -207,6 +216,7 @@ async def marcas(cliente_ruc: str, cantidad: int = 20) -> dict:
         "pedidos_revisados": detalle.get("pedidos_revisados", 0),
         "facturas_leidas": detalle.get("facturas_leidas", 0),
         "skus_distintos": len(todos),
+        "total_monto": round(total, 2),
         "por_marca": ranking,
         **({"ojo_monedas": detalle["ojo_monedas"]} if "ojo_monedas" in detalle else {}),
         **({"devoluciones": detalle["devoluciones"]} if "devoluciones" in detalle else {}),
@@ -347,18 +357,34 @@ async def compras(cliente_ruc: str, cantidad: int = 20,
     # Si una factura vino en soles y otra en dólares, sumarlas sería inventar
     # un número. Se avisa en vez de mezclar.
     monedas = {p["moneda"] for p in productos if p["moneda"]}
+    # `monedas.pop()` de abajo vacía el set. Guardar cuántas había ANTES: si no,
+    # las dos condiciones que siguen dependen de ese efecto colateral.
+    cuantas_monedas = len(monedas)
 
     resultado = {
         "cliente": pedidos_.get("cliente", ""),
         "ruc": cliente_ruc,
-        "moneda": monedas.pop() if len(monedas) == 1 else "",
+        "moneda": monedas.pop() if cuantas_monedas == 1 else "",
         "pedidos_revisados": pedidos_.get("total_pedidos", 0),
         "facturas_leidas": sum(1 for x in xmls if x),
         "lineas": total_lineas,
+        # Cuántos son EN TOTAL, no cuántos se muestran. Sin esto el modelo ve
+        # diez filas y no tiene forma de saber que hay treinta más: es el mismo
+        # recorte silencioso que decía «los primeros 25» y listaba 10.
+        "skus_distintos": len(productos),
         # Los dos ordenamientos, ya sumados. El modelo elige cuál mostrar.
         "por_monto": productos[:MAX_PRODUCTOS],
         "por_unidades": sorted(productos, key=lambda x: -x["unidades"])[:MAX_PRODUCTOS],
     }
+
+    # El total va sobre TODOS los productos, no sobre los diez que se muestran:
+    # sumar la tabla visible da de menos y el modelo no puede darse cuenta.
+    #
+    # Solo cuando hay una sola moneda. Con dos, sumar sería exactamente el
+    # número inventado que este campo existe para evitar — se avisa con
+    # `ojo_monedas` unas líneas más abajo.
+    if cuantas_monedas <= 1:
+        resultado["total_monto"] = round(sum(p["monto"] for p in productos), 2)
 
     # Para `marcas()`, que necesita agrupar sobre TODOS los SKU y no sobre el
     # top 10. Se saca con `pop` antes de devolverlo, así nunca llega al modelo:
@@ -366,7 +392,7 @@ async def compras(cliente_ruc: str, cantidad: int = 20,
     if _completo:
         resultado["_todos"] = [p for p in productos if p.get("sku")]
 
-    if len(monedas) > 1:
+    if cuantas_monedas > 1:
         resultado["ojo_monedas"] = {
             "monedas": sorted(monedas),
             "mensaje": ("Hay facturas en más de una moneda y los montos están "
