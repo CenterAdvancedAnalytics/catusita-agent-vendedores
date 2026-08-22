@@ -134,9 +134,28 @@ async def pedidos(cliente_ruc: str, estado: str | None = None,
 
 
 async def _marca(sku: str) -> str:
-    """La marca de un SKU, del catálogo. Vacío si no está."""
+    """La marca de un SKU, del catálogo. Vacío si no está.
+
+    `ItemCode` NO busca exacto: busca por coincidencia. Pedir `48328` devuelve
+    cuatro filas —el 48328 de NARVA, y ENR48328 / ENR48328B / ENR48328Y de
+    ENERTECH, que lo llevan como `supplierCatalogNumber`—.
+
+    Tomar la primera daba una marca distinta en cada corrida, y siempre para el
+    mismo lado: ENERTECH tiene un equivalente para casi cada foco NARVA. En un
+    ranking real eso movió 685 dólares y 3 SKU de una marca a la otra entre dos
+    ejecuciones sobre los mismos datos.
+
+    Así que se busca la fila cuyo `itemCode` sea EXACTAMENTE el pedido. Las
+    demás son equivalencias, no ese producto.
+    """
     d = await catusita_api.get("/api/article/filter", {"ItemCode": sku})
-    return (d[0].get("brandName") or "") if isinstance(d, list) and d else ""
+    if not isinstance(d, list):
+        return ""
+    objetivo = sku.strip().upper()
+    for fila in d:
+        if (fila.get("itemCode") or "").strip().upper() == objetivo:
+            return fila.get("brandName") or ""
+    return ""
 
 
 async def marcas(cliente_ruc: str, cantidad: int = 20) -> dict:
